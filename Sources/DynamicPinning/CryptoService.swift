@@ -64,7 +64,18 @@ internal final class CryptoService {
     /// - Returns: The decoded and validated payload
     /// - Throws: `CryptoError` if verification fails
     func verifyJWS(jwsString: String, publicKey: String, expectedDomain: String? = nil) throws -> JWSPayload {
-        // Parse the JWS compact serialization
+        let jws = try parseJWS(jwsString)
+        let verifier = try createVerifier(from: publicKey)
+        let payload = try verifySignature(jws: jws, verifier: verifier)
+        let decodedPayload = try decodePayload(payload)
+        try validateTimestamps(decodedPayload)
+        try validateDomain(decodedPayload, expectedDomain: expectedDomain)
+        return decodedPayload
+    }
+    
+    // MARK: - Private Helper Methods
+    
+    private func parseJWS(_ jwsString: String) throws -> JWS {
         guard let jws = try? JWS(compactSerialization: jwsString) else {
             throw CryptoError.invalidJWSFormat
         }
@@ -80,6 +91,10 @@ internal final class CryptoService {
             throw CryptoError.invalidAlgorithm
         }
         
+        return jws
+    }
+    
+    private func createVerifier(from publicKey: String) throws -> Verifier {
         // Decode the ECDSA P-256 public key from Base64 (SPKI format)
         guard let publicKeyData = Data(base64Encoded: publicKey) else {
             NSLog("[DynamicPinning] Failed to decode public key from Base64")
@@ -87,7 +102,6 @@ internal final class CryptoService {
         }
         
         // Create P256.Signing.PublicKey from DER (SPKI) representation using CryptoKit
-        // This requires iOS 14.0+ / macOS 11.0+
         let p256Key: P256.Signing.PublicKey
         do {
             p256Key = try P256.Signing.PublicKey(derRepresentation: publicKeyData)
@@ -118,60 +132,62 @@ internal final class CryptoService {
             throw CryptoError.invalidPublicKey
         }
         
-        // Verify the JWS signature using JOSESwift native verification
-        let payload: Payload
+        return verifier
+    }
+    
+    private func verifySignature(jws: JWS, verifier: Verifier) throws -> Payload {
         do {
-            payload = try jws.validate(using: verifier).payload
+            return try jws.validate(using: verifier).payload
         } catch {
             NSLog("[DynamicPinning] JWS signature verification failed: \(error)")
             throw CryptoError.signatureVerificationFailed
         }
-        
-        // Decode the payload
+    }
+    
+    private func decodePayload(_ payload: Payload) throws -> JWSPayload {
         let payloadData = payload.data()
-        
         let decoder = JSONDecoder()
-        let decodedPayload: JWSPayload
+        
         do {
-            decodedPayload = try decoder.decode(JWSPayload.self, from: payloadData)
+            return try decoder.decode(JWSPayload.self, from: payloadData)
         } catch {
             NSLog("[DynamicPinning] Failed to decode JWS payload: \(error)")
             throw CryptoError.missingClaims
         }
-        
-        // Validate timestamps using injected clock
+    }
+    
+    private func validateTimestamps(_ payload: JWSPayload) throws {
         let now = currentTimestamp()
         let clockSkewTolerance = 300 // 5 minutes
         
         // Check if token is not expired
-        guard decodedPayload.exp > now else {
-            NSLog("[DynamicPinning] Token expired: exp=\(decodedPayload.exp), now=\(now)")
+        guard payload.exp > now else {
+            NSLog("[DynamicPinning] Token expired: exp=\(payload.exp), now=\(now)")
             throw CryptoError.tokenExpired
         }
         
         // Check if iat is not too far in the future (with clock skew tolerance)
-        guard decodedPayload.iat <= now + clockSkewTolerance else {
-            NSLog("[DynamicPinning] Token iat too far in future: iat=\(decodedPayload.iat), now=\(now)")
+        guard payload.iat <= now + clockSkewTolerance else {
+            NSLog("[DynamicPinning] Token iat too far in future: iat=\(payload.iat), now=\(now)")
             throw CryptoError.invalidTimestamp
         }
+    }
+    
+    private func validateDomain(_ payload: JWSPayload, expectedDomain: String?) throws {
+        guard let expectedDomain = expectedDomain else { return }
         
-        // Validate domain match if expectedDomain is provided
-        if let expectedDomain = expectedDomain {
-            let normalizedExpected = expectedDomain.lowercased()
-            let normalizedActual = decodedPayload.domain.lowercased()
-            
-            // Check exact match or wildcard match
-            let isMatch = normalizedExpected == normalizedActual ||
-                          (normalizedActual.hasPrefix("*.") && 
-                           normalizedExpected.hasSuffix(String(normalizedActual.dropFirst(2))))
-            
-            guard isMatch else {
-                NSLog("[DynamicPinning] Domain mismatch: expected=\(expectedDomain), actual=\(decodedPayload.domain)")
-                throw CryptoError.domainMismatch(expected: expectedDomain, actual: decodedPayload.domain)
-            }
+        let normalizedExpected = expectedDomain.lowercased()
+        let normalizedActual = payload.domain.lowercased()
+        
+        // Check exact match or wildcard match
+        let isMatch = normalizedExpected == normalizedActual ||
+                      (normalizedActual.hasPrefix("*.") && 
+                       normalizedExpected.hasSuffix(String(normalizedActual.dropFirst(2))))
+        
+        guard isMatch else {
+            NSLog("[DynamicPinning] Domain mismatch: expected=\(expectedDomain), actual=\(payload.domain)")
+            throw CryptoError.domainMismatch(expected: expectedDomain, actual: payload.domain)
         }
-        
-        return decodedPayload
     }
     
 }

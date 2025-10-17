@@ -140,7 +140,7 @@ extension NetworkService {
         forDomain domain: String,
         includeBackupPins: Bool
     ) throws -> String {
-        var result: Result<String, NetworkError>!
+        var result: Result<String, NetworkError>?
         let semaphore = DispatchSemaphore(value: 0)
 
         fetchFingerprint(forDomain: domain, includeBackupPins: includeBackupPins) { response in

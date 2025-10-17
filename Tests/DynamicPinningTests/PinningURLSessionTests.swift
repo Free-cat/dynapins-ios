@@ -84,7 +84,7 @@ final class PinningURLSessionTests: XCTestCase {
     func testNoRetryOnNonSSLError() {
         // Given - Mock URLSession with non-SSL error
         var requestCount = 0
-        MockRetryURLProtocol.requestHandler = { request in
+        MockRetryURLProtocol.requestHandler = { _ in
             requestCount += 1
             // Network error (not SSL)
             throw NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet, userInfo: nil)
@@ -120,7 +120,7 @@ final class PinningURLSessionTests: XCTestCase {
     func testNoDoubleRetry() {
         // Given - Mock to fail twice with SSL error
         var requestCount = 0
-        MockRetryURLProtocol.requestHandler = { request in
+        MockRetryURLProtocol.requestHandler = { _ in
             requestCount += 1
             // Always fail with SSL cancellation
             throw NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled, userInfo: nil)
@@ -197,7 +197,7 @@ final class PinningURLSessionTests: XCTestCase {
     func testRetryOnlyIfPinRefreshSucceeds() {
         // Given - Mock to fail with SSL error
         var requestCount = 0
-        MockRetryURLProtocol.requestHandler = { request in
+        MockRetryURLProtocol.requestHandler = { _ in
             requestCount += 1
             throw NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled, userInfo: nil)
         }

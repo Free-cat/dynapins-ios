@@ -5,9 +5,9 @@ import XCTest
 @available(iOS 14.0, macOS 10.15, *)
 final class CryptoServiceTests: XCTestCase {
     
-    var cryptoService: CryptoService!
-    var testKeyPair: JWSTestHelper.TestKeyPair!
-    var fixedClock: FixedClock!
+    var cryptoService: CryptoService?
+    var testKeyPair: JWSTestHelper.TestKeyPair?
+    var fixedClock: FixedClock?
     
     override func setUp() {
         super.setUp()
@@ -19,7 +19,7 @@ final class CryptoServiceTests: XCTestCase {
         fixedClock = FixedClock.at(year: 2024, month: 1, day: 15, hour: 12)
         
         // Create crypto service with fixed clock
-        cryptoService = CryptoService(currentTimestamp: fixedClock.now)
+        cryptoService = CryptoService(currentTimestamp: fixedClock!.now)
     }
     
     override func tearDown() {
@@ -152,7 +152,7 @@ final class CryptoServiceTests: XCTestCase {
         let parts = jwsToken.split(separator: ".")
         if parts.count == 3 {
             let tamperedPayload = "{\"domain\":\"hacked.com\",\"pins\":[\"fake\"],\"iat\":\(now),\"exp\":\(now + 3600),\"ttl_seconds\":3600}"
-                .data(using: .utf8)!
+                .data(using: .utf8) ?? Data()
                 .base64EncodedString()
                 .replacingOccurrences(of: "+", with: "-")
                 .replacingOccurrences(of: "/", with: "_")
@@ -423,7 +423,7 @@ final class CryptoServiceTests: XCTestCase {
             "invalid",                              // No dots
             "a.b.c.d",                             // Too many parts
             "",                                     // Empty string
-            "...",                                  // Empty parts
+            "..."                                   // Empty parts
         ]
         
         // When/Then - All should throw invalidJWSFormat
@@ -453,7 +453,7 @@ final class CryptoServiceTests: XCTestCase {
         let invalidKeys = [
             "not_valid_base64!!!",
             "dGVzdA==",  // Too short
-            "",          // Empty
+            ""           // Empty
         ]
         
         // When/Then - Should throw invalidPublicKey or related error

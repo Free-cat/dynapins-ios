@@ -140,7 +140,7 @@ final class PinningIntegrationTests: XCTestCase {
             signingPublicKey: signingPublicKey,
             pinningServiceURL: pinningServiceURL,
             domains: [testDomain]
-        ) { successCount, failureCount in
+        ) { successCount, _ in
             XCTAssertGreaterThan(successCount, 0, "At least one domain should fetch pins successfully")
             initExpectation.fulfill()
         }
@@ -154,7 +154,7 @@ final class PinningIntegrationTests: XCTestCase {
         var requestError: Error?
         var httpStatusCode: Int?
         
-        session.dataTask(with: requestURL) { data, response, error in
+        session.dataTask(with: requestURL) { _, response, error in
             requestError = error
             if let httpResponse = response as? HTTPURLResponse {
                 httpStatusCode = httpResponse.statusCode
@@ -190,7 +190,7 @@ final class PinningIntegrationTests: XCTestCase {
             signingPublicKey: signingPublicKey,
             pinningServiceURL: pinningServiceURL,
             domains: [testDomain]
-        ) { successCount, failureCount in
+        ) { successCount, _ in
             XCTAssertGreaterThan(successCount, 0)
             initExpectation.fulfill()
         }
@@ -203,7 +203,7 @@ final class PinningIntegrationTests: XCTestCase {
         let firstExpectation = self.expectation(description: "First request")
         var firstSuccess = false
         
-        session.dataTask(with: requestURL) { _, response, error in
+        session.dataTask(with: requestURL) { _, _, error in
             firstSuccess = (error == nil)
             firstExpectation.fulfill()
         }.resume()
@@ -226,7 +226,7 @@ final class PinningIntegrationTests: XCTestCase {
         let secondExpectation = self.expectation(description: "Second request after refresh")
         var secondSuccess = false
         
-        session.dataTask(with: requestURL) { _, response, error in
+        session.dataTask(with: requestURL) { _, _, error in
             secondSuccess = (error == nil)
             secondExpectation.fulfill()
         }.resume()
@@ -256,7 +256,7 @@ final class PinningIntegrationTests: XCTestCase {
             pinningServiceURL: pinningServiceURL,
             domains: [testDomain],
             includeBackupPins: true
-        ) { successCount, failureCount in
+        ) { successCount, _ in
             XCTAssertGreaterThan(successCount, 0)
             initExpectation.fulfill()
         }

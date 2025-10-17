@@ -3,12 +3,12 @@
 # Paths to include/exclude
 included:
   - Sources
-  - Tests
 
 excluded:
   - .build
   - .swiftpm
   - Examples
+  - Tests
 
 # Rules
 disabled_rules:
@@ -70,7 +70,7 @@ type_name:
   min_length: 3
   max_length: 50
 
-# Allow some violations in tests (not production code)
+# Rules for production code only (tests are excluded)
 force_unwrapping:
   severity: warning
 

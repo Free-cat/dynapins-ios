@@ -5,7 +5,7 @@ import XCTest
 @available(iOS 14.0, macOS 10.15, *)
 final class NetworkServiceTests: XCTestCase {
     
-    var networkService: NetworkService!
+    var networkService: NetworkService?
     let testServiceURL = URL(string: "https://example.com/cert-fingerprint")!
     
     override func setUp() {
@@ -37,7 +37,7 @@ final class NetworkServiceTests: XCTestCase {
             "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6IjdmZGE0YzFlIn0.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiODhjMzI5Li4uIl0sImlhdCI6MTczNDQ0MTYwMCwiZXhwIjoxNzM0NDQ1MjAwLCJ0dGxfc2Vjb25kcyI6MzYwMH0.SIGNATURE_BYTES"
         }
         """
-        let jsonData = json.data(using: .utf8)!
+        let jsonData = json.data(using: .utf8) ?? Data()
         
         // When
         let decoder = JSONDecoder()
@@ -60,13 +60,16 @@ final class NetworkServiceTests: XCTestCase {
         
         // Setup mock
         MockURLProtocol.requestHandler = { request in
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let response = HTTPURLResponse(
-                url: request.url!,
+                url: url,
                 statusCode: 200,
                 httpVersion: nil,
                 headerFields: ["Content-Type": "application/json"]
             )!
-            return (response, mockResponse.data(using: .utf8)!)
+            return (response, Data(mockResponse.utf8))
         }
         
         let config = URLSessionConfiguration.ephemeral
@@ -93,7 +96,7 @@ final class NetworkServiceTests: XCTestCase {
         // Given
         let expectation = self.expectation(description: "Network error")
         
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.requestHandler = { _ in
             throw NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet, userInfo: nil)
         }
         
@@ -125,8 +128,11 @@ final class NetworkServiceTests: XCTestCase {
         let expectation = self.expectation(description: "Invalid status code")
         
         MockURLProtocol.requestHandler = { request in
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let response = HTTPURLResponse(
-                url: request.url!,
+                url: url,
                 statusCode: 404,
                 httpVersion: nil,
                 headerFields: nil
@@ -164,13 +170,16 @@ final class NetworkServiceTests: XCTestCase {
         let invalidJSON = "not valid json"
         
         MockURLProtocol.requestHandler = { request in
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let response = HTTPURLResponse(
-                url: request.url!,
+                url: url,
                 statusCode: 200,
                 httpVersion: nil,
                 headerFields: ["Content-Type": "application/json"]
             )!
-            return (response, invalidJSON.data(using: .utf8)!)
+            return (response, Data(invalidJSON.utf8))
         }
         
         let config = URLSessionConfiguration.ephemeral
@@ -220,9 +229,12 @@ final class NetworkServiceTests: XCTestCase {
         MockURLProtocol.requestHandler = { request in
             capturedRequest = request
             
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJhcGkuZXhhbXBsZS5jb20iLCJwaW5zIjpbImFiYzEyMyJdLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAzNjAwLCJ0dGxfc2Vjb25kcyI6MzYwMH0.c2lnbmF0dXJl"
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = Data("{\"jws\":\"\(mockJWS)\"}".utf8)
             return (response, data)
         }
         
@@ -240,7 +252,11 @@ final class NetworkServiceTests: XCTestCase {
         
         // Then
         XCTAssertNotNil(capturedRequest)
-        let components = URLComponents(url: capturedRequest!.url!, resolvingAgainstBaseURL: false)
+        guard let request = capturedRequest, let url = request.url else {
+            XCTFail("Request or URL is nil")
+            return
+        }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let domainParam = components?.queryItems?.first { $0.name == "domain" }
         
         XCTAssertNotNil(domainParam, "Should include 'domain' query parameter")
@@ -255,9 +271,12 @@ final class NetworkServiceTests: XCTestCase {
         MockURLProtocol.requestHandler = { request in
             capturedRequest = request
             
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIiwiZGVmNDU2Il0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = Data("{\"jws\":\"\(mockJWS)\"}".utf8)
             return (response, data)
         }
         
@@ -275,7 +294,11 @@ final class NetworkServiceTests: XCTestCase {
         
         // Then
         XCTAssertNotNil(capturedRequest)
-        let components = URLComponents(url: capturedRequest!.url!, resolvingAgainstBaseURL: false)
+        guard let request = capturedRequest, let url = request.url else {
+            XCTFail("Request or URL is nil")
+            return
+        }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let backupParam = components?.queryItems?.first { $0.name == "include-backup-pins" }
         
         XCTAssertNotNil(backupParam, "Should include 'include-backup-pins' query parameter")
@@ -290,9 +313,12 @@ final class NetworkServiceTests: XCTestCase {
         MockURLProtocol.requestHandler = { request in
             capturedRequest = request
             
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = Data("{\"jws\":\"\(mockJWS)\"}".utf8)
             return (response, data)
         }
         
@@ -310,7 +336,11 @@ final class NetworkServiceTests: XCTestCase {
         
         // Then
         XCTAssertNotNil(capturedRequest)
-        let components = URLComponents(url: capturedRequest!.url!, resolvingAgainstBaseURL: false)
+        guard let request = capturedRequest, let url = request.url else {
+            XCTFail("Request or URL is nil")
+            return
+        }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let backupParam = components?.queryItems?.first { $0.name == "include-backup-pins" }
         
         XCTAssertNil(backupParam, "Should NOT include 'include-backup-pins' when false")
@@ -326,9 +356,12 @@ final class NetworkServiceTests: XCTestCase {
         MockURLProtocol.requestHandler = { request in
             capturedRequest = request
             
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = Data("{\"jws\":\"\(mockJWS)\"}".utf8)
             return (response, data)
         }
         
@@ -358,9 +391,12 @@ final class NetworkServiceTests: XCTestCase {
         MockURLProtocol.requestHandler = { request in
             capturedRequest = request
             
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = Data("{\"jws\":\"\(mockJWS)\"}".utf8)
             return (response, data)
         }
         
@@ -389,9 +425,12 @@ final class NetworkServiceTests: XCTestCase {
         MockURLProtocol.requestHandler = { request in
             capturedRequest = request
             
+            guard let url = request.url else {
+                throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+            }
             let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = Data("{\"jws\":\"\(mockJWS)\"}".utf8)
             return (response, data)
         }
         
