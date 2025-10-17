@@ -1,119 +1,379 @@
-# Contributing to Dynapins iOS
+# Contributing to Dynapins iOS SDK
 
-Thank you for your interest in contributing to the Dynapins iOS SDK! 🎉
+First off, thanks for taking the time to contribute! 🎉👍
 
-## ✅ Project Status
+The following is a set of guidelines for contributing to Dynapins iOS SDK. These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
-The core SDK is implemented and ready for testing! We're looking for contributors to help improve and expand it.
+## Table of Contents
 
-## 🤝 How to Contribute
+- [Code of Conduct](#code-of-conduct)
+- [How Can I Contribute?](#how-can-i-contribute)
+- [Development Setup](#development-setup)
+- [Pull Request Process](#pull-request-process)
+- [Coding Standards](#coding-standards)
+- [Commit Messages](#commit-messages)
+- [Testing](#testing)
 
-### Join the Discussion
+## Code of Conduct
 
-- **GitHub Discussions** - Share ideas and ask questions
-- **GitHub Issues** - Report bugs or request features
-- **Pull Requests** - Submit code contributions
+This project and everyone participating in it is governed by respect and professionalism. Be kind and constructive.
 
-### What We Need
+## How Can I Contribute?
 
-Help is welcome in these areas:
+### Reporting Bugs
 
-1. **Testing & Quality**
-   - Integration tests with live backend
-   - Performance testing
-   - Example iOS app
+Before creating bug reports, please check existing issues as you might find that you don't need to create one. When you are creating a bug report, please include as many details as possible:
 
-2. **Documentation**
-   - Additional usage examples
-   - Migration guides from static pinning
-   - Video tutorials
+- **Use a clear and descriptive title**
+- **Describe the exact steps to reproduce the problem**
+- **Provide specific examples** (code snippets, URLs, etc.)
+- **Describe the behavior you observed and what you expected**
+- **Include iOS version, SDK version, Xcode version**
+- **Include logs** (sanitize sensitive data)
 
-3. **Enhancements**
-   - CocoaPods support
-   - Advanced caching strategies
-   - Metrics and monitoring
+**Example Bug Report:**
 
-4. **Bug Reports**
-   - Real-world testing feedback
-   - Edge case scenarios
-   - Performance issues
+```markdown
+### Bug: SSL pinning fails for wildcard domains
 
-## 📋 Requirements
+**Environment:**
+- iOS: 16.0
+- SDK: 0.3.0
+- Xcode: 15.0
 
-- iOS 14.0+
-- Swift 5.9+
-- Xcode 15.0+
-- macOS 13+ (for development)
+**Steps to Reproduce:**
+1. Initialize SDK with `*.example.com`
+2. Make request to `api.example.com`
+3. Request fails with NSURLErrorCancelled
 
-## 🛠️ Development Setup
+**Expected Behavior:**
+Request should succeed as `api.example.com` matches `*.example.com`
 
-1. **Fork the repository**
+**Actual Behavior:**
+Request fails with SSL pinning error
 
-2. **Clone your fork:**
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/dynapins-ios.git
-   cd dynapins-ios
-   ```
-
-3. **Build and test:**
-   ```bash
-   swift build
-   swift test
-   ```
-
-4. **Create a branch:**
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-
-## 🧪 Running Tests
-
-```bash
-# Run all tests
-swift test
-
-# Run tests with verbose output
-swift test -v
-
-# Run specific test
-swift test --filter InitializationTests
+**Logs:**
+```
+[DynamicPinning] ❌ TrustKit validation failed for: api.example.com
+```
 ```
 
-## 📤 Submitting Changes
+### Suggesting Enhancements
 
-1. **Commit with clear messages:**
+Enhancement suggestions are tracked as GitHub issues. Provide the following:
+
+- **Use a clear and descriptive title**
+- **Provide a detailed description of the enhancement**
+- **Explain why this enhancement would be useful**
+- **Provide code examples** if applicable
+
+### Pull Requests
+
+- Fill in the required template
+- Follow the [coding standards](#coding-standards)
+- Include tests for new features
+- Update documentation as needed
+- End all files with a newline
+
+## Development Setup
+
+### Prerequisites
+
+- Xcode 15.0+
+- Swift 5.9+
+- macOS 14.0+
+
+### Setup
+
+```bash
+# 1. Fork and clone
+git clone https://github.com/Free-cat/dynapins-ios.git
+cd dynapins-ios
+
+# 2. Install dependencies (optional, for prettier test output)
+brew install xcbeautify
+
+# 3. Open in Xcode
+open Package.swift
+
+# 4. Build
+swift build
+
+# 5. Run tests
+make test
+```
+
+### Project Structure
+
+```
+dynapins-ios/
+├── Sources/
+│   └── DynamicPinning/
+│       ├── DynamicPinning.swift        # Public API
+│       ├── NetworkService.swift        # Pin fetching
+│       ├── CryptoService.swift         # JWS verification
+│       ├── TrustKitManager.swift       # TrustKit config
+│       ├── TrustKitURLSessionDelegate.swift  # SSL validation
+│       └── PinningURLSession.swift     # Retry logic
+├── Tests/
+│   └── DynamicPinningTests/
+│       ├── *Tests.swift                # Unit tests
+│       └── TestUtilities/              # Test helpers
+├── Makefile                            # Build & test commands
+└── docker-compose.e2e.yml              # E2E test environment
+```
+
+## Pull Request Process
+
+1. **Create a branch** from `main`:
    ```bash
-   git commit -m "feat: add URLSession integration"
+   git checkout -b feature/my-feature
+   # or
+   git checkout -b fix/my-bugfix
    ```
 
-2. **Push to your fork:**
+2. **Make your changes**:
+   - Write clear, concise code
+   - Add tests for new features
+   - Update documentation
+
+3. **Test your changes**:
    ```bash
-   git push origin feature/amazing-feature
+   make test              # Unit tests
+   make test-all          # All tests
+   make e2e-build         # Full E2E
    ```
 
-3. **Create a Pull Request** on GitHub
+4. **Commit your changes**:
+   ```bash
+   git commit -m "feat: add automatic pin refresh"
+   ```
 
-## 💬 Questions?
+5. **Push to your fork**:
+   ```bash
+   git push origin feature/my-feature
+   ```
 
-- **Issues:** [GitHub Issues](https://github.com/Free-cat/dynapins-ios/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/Free-cat/dynapins-ios/discussions)
+6. **Open a Pull Request**:
+   - Use a clear title
+   - Describe what and why
+   - Link related issues
+   - Add screenshots/videos if relevant
 
-## 📝 Code Style
+7. **Code Review**:
+   - Address review comments
+   - Keep PR focused (one feature/fix per PR)
+   - Squash commits if requested
 
-- Follow Swift API Design Guidelines
-- Run SwiftLint before committing
-- Write clear, descriptive comments for public APIs
-- Include unit tests for new functionality
+## Coding Standards
 
-## 📄 License
+### Swift Style Guide
+
+Follow Apple's [Swift API Design Guidelines](https://swift.org/documentation/api-design-guidelines/):
+
+- Use `camelCase` for variables and functions
+- Use `PascalCase` for types
+- Use descriptive names (`fetchPins` not `get`)
+- Prefer `let` over `var`
+- Use `guard` for early exits
+- Avoid force unwrapping (`!`) unless absolutely necessary
+
+### Code Examples
+
+**Good:**
+
+```swift
+func fetchPins(for domain: String, completion: @escaping (Result<[String], Error>) -> Void) {
+    guard !domain.isEmpty else {
+        completion(.failure(NetworkError.invalidDomain))
+        return
+    }
+    
+    // Implementation
+}
+```
+
+**Bad:**
+
+```swift
+func get(d: String, c: @escaping (Result<[String], Error>) -> Void) {
+    // No validation
+    // Short variable names
+}
+```
+
+### Documentation
+
+- Add documentation comments for public APIs
+- Use `///` for single-line docs
+- Use `/** ... */` for multi-line docs
+- Include examples for complex APIs
+
+```swift
+/// Initializes the SDK with the signing public key and domains.
+///
+/// - Parameters:
+///   - signingPublicKey: ES256 public key in Base64 format
+///   - pinningServiceURL: URL to fetch pins from
+///   - domains: List of domains to pin
+///   - completion: Called when initialization completes
+public static func initialize(
+    signingPublicKey: String,
+    pinningServiceURL: URL,
+    domains: [String],
+    completion: @escaping (Int, Int) -> Void
+) {
+    // Implementation
+}
+```
+
+### Logging
+
+Use `NSLog` with `[DynamicPinning]` prefix:
+
+```swift
+NSLog("[DynamicPinning] ✅ Configured pinning for: \(domain)")
+NSLog("[DynamicPinning] ❌ Failed to verify JWS: \(error)")
+NSLog("[DynamicPinning] 🔄 Retrying request with fresh pins...")
+```
+
+## Commit Messages
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+### Format
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+### Types
+
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation only
+- `style`: Code style (formatting, no logic change)
+- `refactor`: Code refactoring
+- `test`: Adding/updating tests
+- `chore`: Build process, tooling
+
+### Examples
+
+```
+feat: add automatic pin refresh on SSL failure
+
+Implements retry logic that automatically refreshes pins when
+an SSL validation error occurs. Limited to one retry per request
+to prevent infinite loops.
+
+Closes #42
+```
+
+```
+fix: race condition in TrustKitManager
+
+Thread-safe access to currentConfiguration using dispatch queue
+with barrier flags.
+```
+
+```
+docs: add troubleshooting section to README
+
+Includes common SSL pinning errors and solutions.
+```
+
+### Scope (Optional)
+
+- `crypto`: CryptoService
+- `network`: NetworkService
+- `trustkit`: TrustKit integration
+- `retry`: Retry logic
+- `tests`: Test-related changes
+
+## Testing
+
+### Writing Tests
+
+- Write tests for all new features
+- Aim for high code coverage (>80%)
+- Use descriptive test names
+- Test happy path and edge cases
+
+**Test Naming:**
+
+```swift
+func testFetchPinsSuccess() { }
+func testFetchPinsWithInvalidURL() { }
+func testFetchPinsNetworkError() { }
+```
+
+### Test Structure
+
+```swift
+func testFeatureName() {
+    // Given
+    let input = "test"
+    
+    // When
+    let result = feature(input)
+    
+    // Then
+    XCTAssertEqual(result, expectedOutput)
+}
+```
+
+### Running Tests
+
+```bash
+# Unit tests only
+make test
+
+# Integration tests
+make test-integration
+
+# All tests
+make test-all
+
+# E2E with Docker
+make e2e-build
+
+# Specific test class
+swift test --filter CryptoServiceTests
+
+# Specific test method
+swift test --filter CryptoServiceTests/testVerifyValidJWS
+```
+
+### Test Utilities
+
+Use provided test helpers:
+
+```swift
+// Generate real JWS tokens
+let keyPair = JWSTestHelper.generateKeyPair()
+let jws = try JWSTestHelper.createSignedFingerprint(
+    domain: "example.com",
+    pins: ["pin1", "pin2"],
+    privateKey: keyPair.privateKey
+)
+
+// Fixed time for deterministic tests
+let clock = FixedClock.at(year: 2024, month: 1, day: 15)
+let service = CryptoService(currentTimestamp: clock.now)
+```
+
+## Questions?
+
+Feel free to open a [Discussion](https://github.com/Free-cat/dynapins-ios/discussions) if you have questions!
+
+## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
 
-Copyright (c) 2025 Artem Melnikov
-
 ---
 
-**Let's build something great together!** 🚀
-
-Made with ❤️ by [Free-cat](https://github.com/Free-cat)
-
+Thank you for contributing! 🙏

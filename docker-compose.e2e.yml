@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  dynapins:
+    image: ${DYNAPINS_IMAGE:-freecats/dynapins-server:latest}
+    build:
+      context: ../dynapins-server
+      dockerfile: Dockerfile
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    environment:
+      ALLOWED_DOMAINS: ${ALLOWED_DOMAINS}
+      SIGNATURE_LIFETIME: ${SIGNATURE_LIFETIME:-1h}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PRIVATE_KEY_PEM: ${PRIVATE_KEY_PEM}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 2s
+      retries: 30
+    profiles:
+      - build
+      - pull

@@ -8,30 +8,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Future enhancements and features
+- Add support for certificate transparency logs
+- Implement pin rotation strategies
+- Add performance metrics collection
+- Support for custom validation policies
 
-## [0.0.1] - 2025-10-17
+## [0.2.0] - 2024-10-17
+
+### Added
+- ✨ **Async Initialization**: Non-blocking SDK setup with completion handlers
+- 🔄 **Automatic Pin Refresh**: Smart retry logic with fresh pins on SSL failures
+- 🛡️ **Fail-Closed Security**: Strict policy for configured domains without pins
+- 🎯 **Explicit URLSessionDelegate**: Custom delegate for precise SSL validation control
+- 🌐 **Wildcard Domain Support**: Matches patterns like `*.example.com`
+- 🔐 **Domain Validation**: JWS payload domain verification with wildcard matching
+- ⚡ **Thread-Safe Operations**: Concurrent pin fetching with proper synchronization
+- 🧪 **Comprehensive Testing**: Unit tests, integration tests, and E2E testing suite
+- 🐳 **Docker E2E Environment**: Complete testing setup with Dynapins server
+- 📦 **CocoaPods Support**: Full podspec configuration for easy integration
+
+### Changed
+- 🔄 **Breaking**: `initialize()` now requires completion handler (async)
+- 🔄 **Breaking**: `refreshPins()` now requires completion handler (async)
+- 🔄 **Breaking**: `SmartURLSession` renamed to `PinningURLSession`
+- 🏗️ **Architecture**: Replaced TrustKit swizzling with explicit URLSessionDelegate
+- 🔒 **Security**: Enhanced JWS verification with domain validation
+- 📱 **Platform**: Minimum iOS 14.0, macOS 11.0 required
+- ⚡ **Performance**: Improved concurrent pin fetching with DispatchGroup
+
+### Fixed
+- 🐛 **SSL Validation**: Fixed pinning not being enforced due to swizzling issues
+- 🐛 **Memory Leaks**: Resolved TrustKit configuration update memory issues
+- 🐛 **Race Conditions**: Fixed concurrent pin fetching synchronization
+- 🐛 **Domain Matching**: Corrected subdomain SSL validation logic
+- 🐛 **Error Handling**: Improved SSL error detection and retry logic
+
+### Security
+- 🔒 **JWS Verification**: Added domain validation to prevent cross-domain attacks
+- 🔒 **Certificate Validation**: Enhanced chain validation with proper error handling
+- 🔒 **Key Security**: Improved secure key storage and validation
+- 🔒 **Timing Attacks**: Fixed potential timing vulnerabilities in crypto operations
+
+## [0.0.1] - 2024-10-17
 
 ### Added
 - Initial release of DynamicPinning iOS SDK
 - Core certificate pinning functionality
-- Ed25519 signature verification
+- ECDSA P-256 signature verification
 - SHA-256 certificate hashing
-- iOS Keychain caching with TTL support
-- Wildcard domain matching (*.example.com)
 - Thread-safe initialization
-- Observability hooks for monitoring pinning events
 - Comprehensive unit test suite
 - SwiftLint configuration
 - CI/CD workflows (GitHub Actions)
-- XCFramework build support
 - Full documentation and examples
 - SPM distribution support
 
 ### Security
 - Fail-closed validation (all errors terminate connections)
-- No external dependencies (only Apple frameworks)
-- Secure Keychain storage for cached fingerprints
+- Secure key storage and validation
 - Cryptographic signature verification for all fingerprints
 
 ---
@@ -79,5 +113,5 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ---
 
-**Questions or Issues?** Please file an issue on [GitHub](https://github.com/your-org/dynapins-ios/issues).
+**Questions or Issues?** Please file an issue on [GitHub](https://github.com/Free-cat/dynapins-ios/issues).
 

@@ -1,27 +1,93 @@
-# Client SDK
+# Xcode
+#
+# gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
 
-# Swift/Xcode
+## Build generated
+build/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## Various settings
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+
+## Other
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+## Obj-C/Swift specific
+*.hmap
+
+## App packaging
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
 .build/
 .swiftpm/
+Packages/
+Package.resolved
 *.xcodeproj
-xcuserdata/
-DerivedData/
 *.xcworkspace
 !default.xcworkspace
-*.playground
 
-# Dependencies
-node_modules/
+# CocoaPods
 Pods/
-.gradle/
-build/
+*.podspec.lock
+Podfile.lock
 
-# IDE
+# Carthage
+Carthage/Build/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Code Injection
+iOSInjectionProject/
+
+# IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
 
-# Maintainer scripts (private monorepo only)
-.maintainer/
+# E2E Testing
+.env.e2e
+/tmp/dynapins-e2e/
+.e2e-test-container.id
+
+# Logs
+*.log
+*.txt
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~.nib

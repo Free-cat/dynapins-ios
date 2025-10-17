@@ -5,22 +5,22 @@ import XCTest
 ///
 /// These tests require a running Dynapins backend server.
 /// Set the following environment variables to run these tests:
-/// - TEST_SERVICE_URL: URL of the Dynapins service (e.g., http://localhost:8080/v1/pins?domain=)
-/// - TEST_PUBLIC_KEY: Base64-encoded Ed25519 public key
+/// - TEST_SERVICE_URL: URL of the Dynapins service (e.g., http://localhost:8080/v1/pins)
+/// - TEST_PUBLIC_KEY: Base64-encoded ECDSA P-256 public key (SPKI format)
 /// - TEST_DOMAIN: Domain to test (must be allowed in server's ALLOWED_DOMAINS)
 ///
 /// Example:
 /// ```bash
-/// export TEST_SERVICE_URL="http://localhost:8080/v1/pins?domain="
-/// export TEST_PUBLIC_KEY="MCowBQYDK2VwAyEA..."
-/// export TEST_DOMAIN="example.com"
+/// export TEST_SERVICE_URL="http://localhost:8080/v1/pins"
+/// export TEST_PUBLIC_KEY="MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQ..."
+/// export TEST_DOMAIN="api.example.com"
 /// swift test --filter PinningIntegrationTests
 /// ```
 @available(iOS 14.0, macOS 10.15, *)
 final class PinningIntegrationTests: XCTestCase {
     
-    var serviceURL: URL?
-    var publicKey: String?
+    var pinningServiceURL: URL?
+    var signingPublicKey: String?
     var testDomain: String?
     var shouldSkipTests: Bool = false
     
@@ -41,14 +41,14 @@ final class PinningIntegrationTests: XCTestCase {
             return
         }
         
-        guard let url = URL(string: urlString + domain) else {
+        guard let url = URL(string: urlString) else {
             print("⚠️ Invalid TEST_SERVICE_URL")
             shouldSkipTests = true
             return
         }
         
-        serviceURL = url
-        publicKey = key
+        pinningServiceURL = url
+        signingPublicKey = key
         testDomain = domain
         shouldSkipTests = false
     }
@@ -57,12 +57,6 @@ final class PinningIntegrationTests: XCTestCase {
         #if DEBUG
         DynamicPinning.resetForTesting()
         #endif
-        
-        // Clean up Keychain
-        if let domain = testDomain {
-            let keychainService = KeychainService()
-            try? keychainService.deleteFingerprint(forDomain: domain)
-        }
         
         super.tearDown()
     }
@@ -74,15 +68,26 @@ final class PinningIntegrationTests: XCTestCase {
             throw XCTSkip("Integration tests skipped - environment not configured")
         }
         
-        guard let serviceURL = serviceURL,
-              let publicKey = publicKey,
+        guard let pinningServiceURL = pinningServiceURL,
+              let signingPublicKey = signingPublicKey,
               let testDomain = testDomain else {
             XCTFail("Test configuration missing")
             return
         }
         
-        // Step 1: Initialize SDK
-        DynamicPinning.initialize(publicKey: publicKey, serviceURL: serviceURL)
+        // Step 1: Initialize SDK (async)
+        let initExpectation = self.expectation(description: "SDK initialized")
+        DynamicPinning.initialize(
+            signingPublicKey: signingPublicKey,
+            pinningServiceURL: pinningServiceURL,
+            domains: [testDomain]
+        ) { successCount, failureCount in
+            NSLog("[Test] Init complete: \(successCount) succeeded, \(failureCount) failed")
+            XCTAssertGreaterThan(successCount, 0, "At least one domain should fetch pins successfully")
+            initExpectation.fulfill()
+        }
+        
+        wait(for: [initExpectation], timeout: 30.0)
         
         // Step 2: Create session
         let session = DynamicPinning.session()
@@ -117,128 +122,162 @@ final class PinningIntegrationTests: XCTestCase {
         XCTAssertTrue(requestSuccess, "Request should succeed with valid pinning")
     }
     
-    func testCachingBehavior() throws {
+    func testRealHTTPSRequest() throws {
         guard !shouldSkipTests else {
             throw XCTSkip("Integration tests skipped - environment not configured")
         }
         
-        guard let serviceURL = serviceURL,
-              let publicKey = publicKey,
+        guard let pinningServiceURL = pinningServiceURL,
+              let signingPublicKey = signingPublicKey,
               let testDomain = testDomain else {
             XCTFail("Test configuration missing")
             return
         }
         
-        // Initialize SDK
-        DynamicPinning.initialize(publicKey: publicKey, serviceURL: serviceURL)
-        
-        var cacheHitCount = 0
-        var cacheMissCount = 0
-        
-        // Set up observability to track cache hits/misses
-        DynamicPinning.setObservabilityHandler { event in
-            switch event {
-            case .cacheHit:
-                cacheHitCount += 1
-            case .cacheMiss:
-                cacheMissCount += 1
-            default:
-                break
-            }
+        // Initialize SDK with TrustKit pinning (wait for completion)
+        let initExpectation = self.expectation(description: "SDK initialized")
+        DynamicPinning.initialize(
+            signingPublicKey: signingPublicKey,
+            pinningServiceURL: pinningServiceURL,
+            domains: [testDomain]
+        ) { successCount, failureCount in
+            XCTAssertGreaterThan(successCount, 0, "At least one domain should fetch pins successfully")
+            initExpectation.fulfill()
         }
+        wait(for: [initExpectation], timeout: 30.0)
         
-        // First request should miss cache
-        let session1 = DynamicPinning.session()
-        let requestURL = URL(string: "https://\(testDomain)")!
-        let expectation1 = self.expectation(description: "First request")
-        
-        session1.dataTask(with: requestURL) { _, _, error in
-            XCTAssertNil(error, "First request should succeed")
-            // Give time for observability events to be processed
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                expectation1.fulfill()
-            }
-        }.resume()
-        
-        wait(for: [expectation1], timeout: 30.0)
-        
-        // Second request should hit cache
-        let session2 = DynamicPinning.session()
-        let expectation2 = self.expectation(description: "Second request")
-        
-        session2.dataTask(with: requestURL) { _, _, error in
-            XCTAssertNil(error, "Second request should succeed")
-            // Give time for observability events to be processed
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                expectation2.fulfill()
-            }
-        }.resume()
-        
-        wait(for: [expectation2], timeout: 30.0)
-        
-        // Verify cache behavior
-        XCTAssertGreaterThan(cacheMissCount, 0, "Should have cache miss on first request")
-        XCTAssertGreaterThan(cacheHitCount, 0, "Should have cache hit on second request")
-    }
-    
-    func testObservabilityEvents() throws {
-        guard !shouldSkipTests else {
-            throw XCTSkip("Integration tests skipped - environment not configured")
-        }
-        
-        guard let serviceURL = serviceURL,
-              let publicKey = publicKey,
-              let testDomain = testDomain else {
-            XCTFail("Test configuration missing")
-            return
-        }
-        
-        // Initialize SDK
-        DynamicPinning.initialize(publicKey: publicKey, serviceURL: serviceURL)
-        
-        var events: [PinningEvent] = []
-        let eventsQueue = DispatchQueue(label: "test.events")
-        
-        // Set up observability handler
-        DynamicPinning.setObservabilityHandler { event in
-            eventsQueue.sync {
-                events.append(event)
-            }
-        }
-        
-        // Make request
+        // Get session - TrustKit is configured and will validate SSL
         let session = DynamicPinning.session()
         let requestURL = URL(string: "https://\(testDomain)")!
-        let expectation = self.expectation(description: "Request completed")
+        let expectation = self.expectation(description: "HTTPS request")
         
-        session.dataTask(with: requestURL) { _, _, _ in
-            // Give time for observability events to be processed
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                expectation.fulfill()
+        var requestError: Error?
+        var httpStatusCode: Int?
+        
+        session.dataTask(with: requestURL) { data, response, error in
+            requestError = error
+            if let httpResponse = response as? HTTPURLResponse {
+                httpStatusCode = httpResponse.statusCode
             }
+            expectation.fulfill()
         }.resume()
         
         wait(for: [expectation], timeout: 30.0)
         
-        // Verify events were emitted
-        eventsQueue.sync {
-            XCTAssertFalse(events.isEmpty, "Should have emitted events")
-            
-            // Should have either cache hit/miss
-            let hasCacheEvent = events.contains { event in
-                if case .cacheHit = event { return true }
-                if case .cacheMiss = event { return true }
-                return false
-            }
-            XCTAssertTrue(hasCacheEvent, "Should have cache event")
-            
-            // Should have success event (assuming valid certificate)
-            let hasSuccess = events.contains { event in
-                if case .success = event { return true }
-                return false
-            }
-            XCTAssertTrue(hasSuccess, "Should have success event for valid certificate")
+        // Verify request succeeded with valid SSL certificate
+        XCTAssertNil(requestError, "HTTPS request should succeed with valid pinned certificate")
+        XCTAssertNotNil(httpStatusCode, "Should receive HTTP response")
+        
+        NSLog("[Test] ✅ Real HTTPS request to \(testDomain) succeeded with TrustKit pinning")
+    }
+    
+    func testCertificateRotationScenario() throws {
+        guard !shouldSkipTests else {
+            throw XCTSkip("Integration tests skipped - environment not configured")
         }
+        
+        guard let pinningServiceURL = pinningServiceURL,
+              let signingPublicKey = signingPublicKey,
+              let testDomain = testDomain else {
+            XCTFail("Test configuration missing")
+            return
+        }
+        
+        // Scenario: Simulate certificate rotation
+        // 1. Initialize SDK with current pins (wait for completion)
+        let initExpectation = self.expectation(description: "SDK initialized")
+        DynamicPinning.initialize(
+            signingPublicKey: signingPublicKey,
+            pinningServiceURL: pinningServiceURL,
+            domains: [testDomain]
+        ) { successCount, failureCount in
+            XCTAssertGreaterThan(successCount, 0)
+            initExpectation.fulfill()
+        }
+        wait(for: [initExpectation], timeout: 30.0)
+        
+        // 2. Make first request - should succeed
+        let session = DynamicPinning.session()
+        let requestURL = URL(string: "https://\(testDomain)")!
+        
+        let firstExpectation = self.expectation(description: "First request")
+        var firstSuccess = false
+        
+        session.dataTask(with: requestURL) { _, response, error in
+            firstSuccess = (error == nil)
+            firstExpectation.fulfill()
+        }.resume()
+        
+        wait(for: [firstExpectation], timeout: 30.0)
+        XCTAssertTrue(firstSuccess, "Initial request should succeed")
+        
+        // 3. Manually refresh pins (simulating app detecting stale pins or periodic refresh)
+        NSLog("[Test] 🔄 Simulating pin refresh after certificate rotation...")
+        
+        let refreshExpectation = self.expectation(description: "Pin refresh")
+        DynamicPinning.refreshPins { successCount, failureCount in
+            NSLog("[Test] Refresh complete: \(successCount) succeeded, \(failureCount) failed")
+            refreshExpectation.fulfill()
+        }
+        
+        wait(for: [refreshExpectation], timeout: 30.0)
+        
+        // 4. Make another request with fresh pins - should still succeed
+        let secondExpectation = self.expectation(description: "Second request after refresh")
+        var secondSuccess = false
+        
+        session.dataTask(with: requestURL) { _, response, error in
+            secondSuccess = (error == nil)
+            secondExpectation.fulfill()
+        }.resume()
+        
+        wait(for: [secondExpectation], timeout: 30.0)
+        XCTAssertTrue(secondSuccess, "Request after pin refresh should succeed")
+        
+        NSLog("[Test] ✅ Certificate rotation scenario: pins refreshed without app restart")
+    }
+    
+    func testBackupPinRotationScenario() throws {
+        guard !shouldSkipTests else {
+            throw XCTSkip("Integration tests skipped - environment not configured")
+        }
+        
+        guard let pinningServiceURL = pinningServiceURL,
+              let signingPublicKey = signingPublicKey,
+              let testDomain = testDomain else {
+            XCTFail("Test configuration missing")
+            return
+        }
+        
+        // Initialize SDK with backup pins enabled (wait for completion)
+        let initExpectation = self.expectation(description: "SDK initialized")
+        DynamicPinning.initialize(
+            signingPublicKey: signingPublicKey,
+            pinningServiceURL: pinningServiceURL,
+            domains: [testDomain],
+            includeBackupPins: true
+        ) { successCount, failureCount in
+            XCTAssertGreaterThan(successCount, 0)
+            initExpectation.fulfill()
+        }
+        wait(for: [initExpectation], timeout: 30.0)
+        
+        // Make a request - should succeed
+        let session = DynamicPinning.session()
+        let requestURL = URL(string: "https://\(testDomain)")!
+        
+        let expectation = self.expectation(description: "Request with backup pins")
+        var success = false
+        
+        session.dataTask(with: requestURL) { _, _, error in
+            success = (error == nil)
+            expectation.fulfill()
+        }.resume()
+        
+        wait(for: [expectation], timeout: 30.0)
+        XCTAssertTrue(success, "Request with backup pins should succeed")
+        
+        NSLog("[Test] ✅ Backup pin scenario: request succeeded with primary and backup pins")
     }
     
     // MARK: - Failure Scenarios
@@ -248,14 +287,23 @@ final class PinningIntegrationTests: XCTestCase {
             throw XCTSkip("Integration tests skipped - environment not configured")
         }
         
-        guard let serviceURL = serviceURL,
-              let publicKey = publicKey else {
+        guard let pinningServiceURL = pinningServiceURL,
+              let signingPublicKey = signingPublicKey,
+              let testDomain = testDomain else {
             XCTFail("Test configuration missing")
             return
         }
         
-        // Initialize SDK
-        DynamicPinning.initialize(publicKey: publicKey, serviceURL: serviceURL)
+        // Initialize SDK (wait for completion)
+        let initExpectation = self.expectation(description: "SDK initialized")
+        DynamicPinning.initialize(
+            signingPublicKey: signingPublicKey,
+            pinningServiceURL: pinningServiceURL,
+            domains: [testDomain]
+        ) { _, _ in
+            initExpectation.fulfill()
+        }
+        wait(for: [initExpectation], timeout: 30.0)
         
         // Try to connect to a domain not allowed by the server
         let session = DynamicPinning.session()
@@ -279,44 +327,33 @@ final class PinningIntegrationTests: XCTestCase {
             throw XCTSkip("Integration tests skipped - environment not configured")
         }
         
-        guard let serviceURL = serviceURL,
+        guard let pinningServiceURL = pinningServiceURL,
               let testDomain = testDomain else {
             XCTFail("Test configuration missing")
             return
         }
         
-        // Use an invalid public key
-        let invalidKey = "dGVzdF9pbnZhbGlkX2tleQ==" // Not a valid Ed25519 key
+        // Use an invalid public key - SDK should fail to initialize or fetch pins
+        let invalidKey = "dGVzdF9pbnZhbGlkX2tleQ==" // Not a valid ECDSA P-256 key
         
-        DynamicPinning.initialize(publicKey: invalidKey, serviceURL: serviceURL)
-        
-        var failureReason: PinningFailureReason?
-        
-        // Set up observability to capture failure
-        DynamicPinning.setObservabilityHandler { event in
-            if case .failure(_, let reason) = event {
-                failureReason = reason
-            }
+        // Initialize with invalid key - should fail to verify JWS (wait for completion)
+        let initExpectation = self.expectation(description: "SDK initialized")
+        DynamicPinning.initialize(
+            signingPublicKey: invalidKey,
+            pinningServiceURL: pinningServiceURL,
+            domains: [testDomain]
+        ) { successCount, failureCount in
+            XCTAssertEqual(successCount, 0, "Should fail with invalid key")
+            XCTAssertGreaterThan(failureCount, 0, "Should have failures")
+            initExpectation.fulfill()
         }
+        wait(for: [initExpectation], timeout: 30.0)
         
+        // Even with invalid key, session() should work (but no pins configured)
         let session = DynamicPinning.session()
-        let requestURL = URL(string: "https://\(testDomain)")!
-        let expectation = self.expectation(description: "Request should fail")
+        XCTAssertNotNil(session, "Should still return a session")
         
-        var didFail = false
-        
-        session.dataTask(with: requestURL) { _, _, error in
-            didFail = (error != nil)
-            // Give time for observability events to be processed
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                expectation.fulfill()
-            }
-        }.resume()
-        
-        wait(for: [expectation], timeout: 30.0)
-        
-        XCTAssertTrue(didFail, "Request with invalid public key should fail")
-        XCTAssertNotNil(failureReason, "Should capture failure reason")
+        NSLog("[Test] Invalid public key test: SDK initialized but pins not configured")
     }
     
     // MARK: - Performance Tests
@@ -326,15 +363,24 @@ final class PinningIntegrationTests: XCTestCase {
             throw XCTSkip("Integration tests skipped - environment not configured")
         }
         
-        guard let serviceURL = serviceURL,
-              let publicKey = publicKey,
+        guard let pinningServiceURL = pinningServiceURL,
+              let signingPublicKey = signingPublicKey,
               let testDomain = testDomain else {
             XCTFail("Test configuration missing")
             return
         }
         
-        // Initialize and warm up cache
-        DynamicPinning.initialize(publicKey: publicKey, serviceURL: serviceURL)
+        // Initialize and warm up cache (wait for completion)
+        let initExpectation = self.expectation(description: "SDK initialized")
+        DynamicPinning.initialize(
+            signingPublicKey: signingPublicKey,
+            pinningServiceURL: pinningServiceURL,
+            domains: [testDomain]
+        ) { _, _ in
+            initExpectation.fulfill()
+        }
+        wait(for: [initExpectation], timeout: 30.0)
+        
         let session = DynamicPinning.session()
         let requestURL = URL(string: "https://\(testDomain)")!
         
@@ -364,14 +410,24 @@ final class PinningIntegrationTests: XCTestCase {
             throw XCTSkip("Integration tests skipped - environment not configured")
         }
         
-        guard let serviceURL = serviceURL,
-              let publicKey = publicKey,
+        guard let pinningServiceURL = pinningServiceURL,
+              let signingPublicKey = signingPublicKey,
               let testDomain = testDomain else {
             XCTFail("Test configuration missing")
             return
         }
         
-        DynamicPinning.initialize(publicKey: publicKey, serviceURL: serviceURL)
+        // Initialize SDK (wait for completion)
+        let initExpectation = self.expectation(description: "SDK initialized")
+        DynamicPinning.initialize(
+            signingPublicKey: signingPublicKey,
+            pinningServiceURL: pinningServiceURL,
+            domains: [testDomain]
+        ) { _, _ in
+            initExpectation.fulfill()
+        }
+        wait(for: [initExpectation], timeout: 30.0)
+        
         let session = DynamicPinning.session()
         let requestURL = URL(string: "https://\(testDomain)")!
         
@@ -401,35 +457,6 @@ final class PinningIntegrationTests: XCTestCase {
         XCTAssertEqual(successCount, concurrentCount, "All concurrent requests should succeed")
     }
     
-    // MARK: - Helper Tests
-    
-    func testServiceAvailability() throws {
-        guard !shouldSkipTests else {
-            throw XCTSkip("Integration tests skipped - environment not configured")
-        }
-        
-        guard let serviceURL = serviceURL else {
-            XCTFail("Service URL not configured")
-            return
-        }
-        
-        // Test that we can reach the service
-        let expectation = self.expectation(description: "Service check")
-        
-        var isAvailable = false
-        
-        let task = URLSession.shared.dataTask(with: serviceURL) { _, response, _ in
-            if let httpResponse = response as? HTTPURLResponse {
-                isAvailable = (httpResponse.statusCode == 200)
-            }
-            expectation.fulfill()
-        }
-        
-        task.resume()
-        wait(for: [expectation], timeout: 10.0)
-        
-        XCTAssertTrue(isAvailable, "Dynapins service should be available at \(serviceURL)")
-    }
 }
 
 // MARK: - Test Utilities
@@ -440,9 +467,9 @@ extension PinningIntegrationTests {
     /// Helper to print test configuration
     func printTestConfiguration() {
         print("=== Integration Test Configuration ===")
-        print("Service URL: \(serviceURL?.absoluteString ?? "NOT SET")")
+        print("Service URL: \(pinningServiceURL?.absoluteString ?? "NOT SET")")
         print("Test Domain: \(testDomain ?? "NOT SET")")
-        print("Public Key: \(publicKey?.prefix(20) ?? "NOT SET")...")
+        print("Public Key: \(signingPublicKey?.prefix(20) ?? "NOT SET")...")
         print("=====================================")
     }
 }

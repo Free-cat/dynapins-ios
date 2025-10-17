@@ -1,301 +1,418 @@
 # Dynapins iOS SDK
 
-> Lightweight, dependency-free iOS SDK for dynamic TLS certificate pinning with automatic fingerprint management.
+<p align="center">
+  <strong>Dynamic TLS certificate pinning for iOS with automatic pin management</strong>
+</p>
 
-[![Build Status](https://github.com/Free-cat/dynapins-ios/workflows/CI/badge.svg)](https://github.com/Free-cat/dynapins-ios/actions)
-[![Swift Version](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/platform-iOS%2014.0+-lightgrey.svg)](https://www.apple.com/ios/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Swift Package Manager](https://img.shields.io/badge/SPM-compatible-brightgreen.svg)](https://swift.org/package-manager/)
+<p align="center">
+  <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-5.9+-orange.svg" alt="Swift Version"></a>
+  <a href="https://www.apple.com/ios/"><img src="https://img.shields.io/badge/iOS-14.0+-lightgrey.svg" alt="Platform"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <a href="https://swift.org/package-manager/"><img src="https://img.shields.io/badge/SPM-compatible-brightgreen.svg" alt="SPM"></a>
+</p>
 
-## 🚀 Features
+---
 
-- **🔒 Secure by Default**: All connections fail-closed on validation errors
-- **⚡️ Zero Dependencies**: Self-contained with only Apple frameworks
-- **🎯 Drop-in Integration**: < 30 minutes to add to existing apps
-- **🔄 Automatic Updates**: Fetches and caches fingerprints dynamically
-- **✍️ Cryptographic Verification**: Ed25519 signature validation
-- **🔐 Secure Storage**: Fingerprints cached in iOS Keychain
-- **🌐 Wildcard Support**: Matches patterns like `*.example.com`
-- **📱 iOS 14.0+**: Modern Swift Package Manager distribution
+## Features
 
-## 📦 Installation
+- ✅ **Dynamic Pin Management** - Fetches and updates pins from your backend
+- 🔒 **Fail-Closed Security** - All SSL errors block the connection for configured domains
+- 🔐 **JWS Verification** - Cryptographically verifies pins using ES256 signatures
+- 🔄 **Auto-Retry** - Automatically refreshes pins and retries on SSL failures
+- 🎯 **Simple Integration** - 3-line setup, works with standard URLSession
+- 🌐 **Wildcard Support** - Supports patterns like `*.example.com`
+- 🚀 **Async/Await Ready** - Full Swift concurrency support
+
+## Installation
 
 ### Swift Package Manager
 
-Add the following to your `Package.swift`:
+Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Free-cat/dynapins-ios.git", from: "0.0.1")
+    .package(url: "https://github.com/Free-cat/dynapins-ios.git", from: "0.2.0")
 ]
 ```
 
-Or in Xcode:
-1. File → Add Packages
-2. Enter the repository URL
-3. Select version and add to your target
+Or in **Xcode**:
+1. **File → Add Packages**
+2. Enter: `https://github.com/Free-cat/dynapins-ios`
+3. Select version and add to target
 
-## 🎯 Quick Start
+### CocoaPods
+
+```ruby
+pod 'dynapins-ios', '~> 0.2.0'
+```
+
+## Quick Start
 
 ### 1. Initialize the SDK
 
-In your `AppDelegate` or app initialization code:
+In your `AppDelegate` or app initialization:
 
 ```swift
 import DynamicPinning
 
-// Initialize once at app launch
 DynamicPinning.initialize(
-    publicKey: "MCowBQYDK2VwAyEA...", // Your Ed25519 public key (Base64)
-    serviceURL: URL(string: "https://your-server.com/v1/pins?domain=api.example.com")!
-)
+    signingPublicKey: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...", // Your ES256 public key
+    pinningServiceURL: URL(string: "https://pins.example.com/v1/pins")!,
+    domains: ["api.example.com", "*.cdn.example.com"]
+) { successCount, failureCount in
+    print("✅ Pinning configured for \(successCount) domains")
+}
 ```
 
-### 2. Use the Preconfigured URLSession
+### 2. Use the Session
 
 ```swift
-// Get a URLSession with automatic pinning
 let session = DynamicPinning.session()
 
-// Make requests - pinning happens automatically
-let task = session.dataTask(with: URL(string: "https://api.example.com/data")!) { data, response, error in
+// All requests automatically use certificate pinning
+session.dataTask(with: URL(string: "https://api.example.com/data")!) { data, response, error in
     if let error = error {
-        // Connection failed (could be pinning failure)
-        print("Request failed: \(error)")
+        print("Error: \(error)")
         return
     }
-    
-    // Connection succeeded and certificate was validated!
-    if let data = data {
-        // Process your data
-    }
-}
-
-task.resume()
+    // Handle response
+}.resume()
 ```
 
-That's it! 🎉 Your app now uses dynamic certificate pinning.
+### 3. Async/Await
 
-## 📖 How It Works
+```swift
+let session = DynamicPinning.session()
+let (data, response) = try await session.data(from: URL(string: "https://api.example.com")!)
+```
 
-1. **Initialization**: You provide an Ed25519 public key and a Dynapins service URL
-2. **First Request**: SDK fetches a signed fingerprint from your service
-3. **Verification**: Signature is verified using the embedded public key
-4. **Validation**: Server's certificate is hashed and compared to the fingerprint
-5. **Caching**: Valid fingerprints are cached in Keychain with TTL
-6. **Subsequent Requests**: Cached fingerprints are used until they expire
+That's it! 🎉
+
+## How It Works
 
 ```
 ┌─────────────┐
-│   Your App  │
+│   iOS App   │  1. Initialize with ES256 public key + domains
 └──────┬──────┘
-       │ 1. Initialize
-       ▼
-┌─────────────────┐      2. Fetch Fingerprint     ┌──────────────────┐
-│ DynamicPinning  │ ──────────────────────────────▶│ Dynapins Service │
-│      SDK        │                                 └──────────────────┘
-└─────────────────┘                                          │
-       │                                                     │
-       │ 3. Verify Signature (Ed25519)                      │
-       │◀────────────────────────────────────────────────────┘
        │
-       │ 4. TLS Handshake
+       ▼
+┌─────────────────┐      2. Fetch JWS       ┌──────────────────┐
+│ DynamicPinning  │ ─────────────────────▶  │ Dynapins Server  │
+│      SDK        │                         └──────────────────┘
+└─────────────────┘                                   │
+       │  3. Verify JWS signature (ES256)             │
+       │◀─────────────────────────────────────────────┘
+       │  4. Configure TrustKit with validated pins
        ▼
 ┌─────────────────┐
-│  Your Backend   │
-│   (api.com)     │
+│  HTTPS Request  │ ── 5. TLS Handshake + Pin Validation ──▶ ✅ or ❌
 └─────────────────┘
        │
-       │ 5. Hash & Compare Certificate
+       │  On SSL failure:
        ▼
-    ✅ Success or ❌ Fail
+    🔄 Auto-refresh pins and retry once
 ```
 
-## 🔐 Security Guarantees
+**Key Points:**
+- SDK fetches JWS-signed pins from your backend
+- Verifies JWS signature using embedded ES256 public key  
+- Configures TrustKit for SSL validation
+- Automatically retries on SSL failure (refreshes pins once per request)
 
-- **Fail-Closed**: All errors (network, signature, hash mismatch) result in connection termination
-- **No Downgrades**: The SDK never falls back to default certificate validation
-- **Signature Required**: Fingerprints must be cryptographically signed by your public key
-- **Secure Storage**: Cached fingerprints are stored in iOS Keychain with encryption
-- **No Sensitive Data**: SDK never logs or transmits PII or certificate material
+## Backend Setup
 
-## 🎛️ Advanced Usage
+You need to run the [Dynapins Server](https://github.com/Free-cat/dynapins-server) to serve signed pins.
 
-### Multiple Domains
+### Quick Start with Docker
 
-The SDK supports wildcard patterns from the service:
+```bash
+# 1. Generate ES256 keypair
+openssl ecparam -genkey -name prime256v1 -out private_key.pem
+openssl pkcs8 -topk8 -nocrypt -in private_key.pem -out private_key_pkcs8.pem
 
-```json
-{
-  "domain": "*.example.com",
-  "fingerprint": "a1b2c3...",
-  "signature": "...",
-  "ttl": 86400
+# 2. Extract public key (use this in iOS app)
+openssl ec -in private_key.pem -pubout | grep -v "BEGIN\|END" | tr -d '\n' > public_key.txt
+cat public_key.txt
+
+# 3. Run server
+docker run -p 8080:8080 \
+  -e ALLOWED_DOMAINS="api.example.com,*.example.com" \
+  -e PRIVATE_KEY_PEM="$(cat private_key_pkcs8.pem)" \
+  freecats/dynapins-server:latest
+```
+
+See [Dynapins Server docs](https://github.com/Free-cat/dynapins-server) for production deployment.
+
+## Advanced Usage
+
+### Manual Pin Refresh
+
+```swift
+DynamicPinning.refreshPins { successCount, failureCount in
+    print("Refreshed \(successCount) domains")
 }
 ```
-
-This will match:
-- `api.example.com` ✅
-- `cdn.example.com` ✅
-- `example.com` ❌ (wildcard requires subdomain)
 
 ### Error Handling
 
 ```swift
-let session = DynamicPinning.session()
-
-let task = session.dataTask(with: url) { data, response, error in
-    if let error = error as? URLError {
-        switch error.code {
-        case .serverCertificateUntrusted:
-            // Pinning validation failed
-            print("Certificate pinning failed")
-        case .cannotConnectToHost:
-            // Network issue
-            print("Network error")
-        default:
-            print("Other error: \(error)")
+session.dataTask(with: url) { data, response, error in
+    if let error = error as NSError? {
+        if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled {
+            print("❌ SSL pinning validation failed")
+        } else {
+            print("❌ Other error: \(error)")
         }
     }
 }
 ```
 
-### Using with Async/Await
+### Configure Multiple Domains
 
 ```swift
-let session = DynamicPinning.session()
-
-do {
-    let (data, response) = try await session.data(from: url)
-    // Process data
-} catch {
-    // Handle error
+DynamicPinning.initialize(
+    signingPublicKey: publicKey,
+    pinningServiceURL: serviceURL,
+    domains: [
+        "api.example.com",      // Exact match
+        "*.cdn.example.com",    // Wildcard: matches api.cdn.example.com, img.cdn.example.com
+        "*.internal.example.com"
+    ]
+) { successCount, failureCount in
+    print("✅ Success: \(successCount), ❌ Failed: \(failureCount)")
 }
 ```
 
-## 🛠️ Configuration
+### Include Backup Pins
 
-### Required
-
-- **publicKey**: Ed25519 public key (Base64-encoded, raw format)
-- **serviceURL**: URL to your Dynapins service endpoint
-
-### Service Response Format
-
-Your Dynapins server must return JSON in this format:
-
-```json
-{
-  "domain": "*.example.com",
-  "fingerprint": "a1b2c3d4e5f6...",
-  "signature": "dGVzdF9zaWduYXR1cmU=",
-  "ttl": 86400
+```swift
+DynamicPinning.initialize(
+    signingPublicKey: publicKey,
+    pinningServiceURL: serviceURL,
+    domains: domains,
+    includeBackupPins: true  // Include backup pins for certificate rotation
+) { successCount, failureCount in
+    // Handle result
 }
 ```
 
-Where:
-- `domain`: Domain pattern (exact or wildcard like `*.example.com`)
-- `fingerprint`: SHA-256 hash of the certificate's public key (hex)
-- `signature`: Ed25519 signature of the fingerprint (Base64)
-- `ttl`: Time-to-live in seconds
+## Testing
 
-### Running the Dynapins Server
-
-The easiest way to run the backend is using Docker:
+### Run Tests Locally
 
 ```bash
-# Generate Ed25519 key pair
-openssl genpkey -algorithm Ed25519 -out private_key.pem
-openssl pkey -in private_key.pem -pubout -out public_key.pem
+# Unit tests only (fast, ~6 seconds)
+make test
 
-# Run the server
+# Integration tests (requires running server)
+make test-integration
+
+# All tests (unit + integration)
+make test-all
+```
+
+### E2E Testing with Docker
+
+```bash
+# Build local server + run integration tests
+make e2e-build
+
+# Or pull from Docker Hub + run tests
+make e2e-pull
+
+# Stop containers
+make e2e-down
+
+# Show all commands
+make help
+```
+
+### Manual Integration Test
+
+```bash
+# 1. Start server
 docker run -p 8080:8080 \
-  -e ALLOWED_DOMAINS="example.com,*.example.com" \
+  -e ALLOWED_DOMAINS="api.example.com" \
   -e PRIVATE_KEY_PEM="$(cat private_key.pem)" \
   freecats/dynapins-server:latest
-```
 
-See the [Dynapins Server documentation](https://github.com/Free-cat/dynapins-server) for more details.
-
-## 🧪 Testing
-
-### Unit Tests
-
-Run the unit test suite:
-
-```bash
-swift test
-```
-
-### Integration Tests (E2E)
-
-Run end-to-end tests against a live backend:
-
-```bash
-# 1. Start the test server
-./Scripts/setup-test-env.sh
-
-# 2. Export test variables
-source <(./Scripts/export-test-vars.sh)
+# 2. Set environment variables
+export TEST_SERVICE_URL="http://localhost:8080/v1/pins"
+export TEST_PUBLIC_KEY="<your-public-key>"
+export TEST_DOMAIN="api.example.com"
 
 # 3. Run integration tests
-./Scripts/run-integration-tests.sh
+swift test --filter PinningIntegrationTests
 ```
 
-See [Integration Testing Guide](./Docs/integration-testing.md) for detailed instructions.
+## Security
 
-## 📊 Performance
+### What's Protected
 
-- **First Request**: < 50ms overhead (includes network fetch + verification)
-- **Cached Requests**: < 1ms overhead (Keychain lookup + hash comparison)
-- **Binary Size**: < 100KB added to your app
+- **JWS Signature Verification**: All pins must be signed with your ES256 private key
+- **Domain Validation**: Payload domain must match the requested domain
+- **Fail-Closed Policy**: SSL errors for configured domains always block the connection
+- **No Downgrades**: Uses explicit URLSessionDelegate (TrustKit swizzling disabled)
+- **Wildcard Matching**: Secure wildcard support with proper validation
 
-## 🚨 Important Notes
+### Security Model
 
-### Multiple Initialization
+```
+✅ Good: Request to configured domain with valid pin → Connection allowed
+❌ Fail: Request to configured domain with invalid pin → Connection blocked
+⚠️  Warn: Request to non-configured domain → Standard iOS validation (no pinning)
+```
 
-⚠️ **DEBUG builds**: Calling `initialize()` multiple times will crash with `preconditionFailure`  
-ℹ️ **RELEASE builds**: Subsequent calls are ignored with a warning log
+### Cryptography
 
-### Thread Safety
+- **Algorithm**: ES256 (ECDSA with P-256 and SHA-256)
+- **Signature Library**: JOSESwift
+- **SSL Pinning**: TrustKit
+- **Key Format**: SPKI (SubjectPublicKeyInfo) in Base64
 
-All SDK methods are thread-safe and can be called from any queue.
+## Requirements
 
-### Testing Your Integration
+- **iOS**: 14.0+
+- **macOS**: 10.15+
+- **Swift**: 5.9+
+- **Xcode**: 15.0+
 
-1. Ensure your Dynapins service is running and accessible
-2. Make a test request to a domain covered by your fingerprint
-3. Check logs for any warnings or errors
-4. Verify the connection succeeds
+## Dependencies
 
-## 🔗 Related Projects
+This SDK uses battle-tested open-source libraries:
 
-- **[Dynapins Server](https://github.com/Free-cat/dynapins-server)** - Go backend for serving signed fingerprints
-  - Docker image: [`freecats/dynapins-server`](https://hub.docker.com/r/freecats/dynapins-server)
-- **[Dynapins Android](https://github.com/Free-cat/dynapins-android)** - Android SDK (coming soon)
+- [**TrustKit**](https://github.com/datatheorem/TrustKit) - SSL certificate pinning (by Data Theorem)
+- [**JOSESwift**](https://github.com/airsidemobile/JOSESwift) - JWS signature verification
 
-## 📚 Additional Documentation
+## Architecture
 
-- [Architecture Overview](./Docs/architecture.md) - How the SDK works internally
-- [Integration Testing Guide](./Docs/integration-testing.md) - Running e2e tests
-- [Dynapins Server Setup](https://github.com/Free-cat/dynapins-server#readme) - Backend deployment guide
+```
+┌──────────────────────────────────────────────────────┐
+│                  DynamicPinning                      │
+│  ┌────────────────────────────────────────────────┐ │
+│  │  DynamicPinning.swift (Public API)             │ │
+│  └────────────────────────────────────────────────┘ │
+│         │                            │               │
+│         ▼                            ▼               │
+│  ┌──────────────┐           ┌───────────────┐      │
+│  │ NetworkService│          │ CryptoService │      │
+│  │ (Fetch pins) │          │ (Verify JWS)  │      │
+│  └──────────────┘           └───────────────┘      │
+│         │                            │               │
+│         └────────────┬───────────────┘               │
+│                      ▼                               │
+│            ┌──────────────────┐                     │
+│            │ TrustKitManager  │                     │
+│            │ (Configure pins) │                     │
+│            └──────────────────┘                     │
+│                      │                               │
+└──────────────────────┼───────────────────────────────┘
+                       ▼
+              ┌─────────────────┐
+              │ TrustKit (SSL)  │
+              └─────────────────┘
+                       │
+                       ▼
+              ┌─────────────────┐
+              │  URLSession     │
+              └─────────────────┘
+```
 
-## 🤝 Contributing
+## FAQ
 
-We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+**Q: Do I need to modify my networking code?**  
+A: No. Just replace `URLSession.shared` with `DynamicPinning.session()`.
 
-## 🙋 Support
+**Q: What happens if the backend is down?**  
+A: Cached pins are used. If no cache exists, connection fails (fail-closed).
 
-- Report issues: [GitHub Issues](https://github.com/Free-cat/dynapins-ios/issues)
-- Questions: Open a [GitHub Discussion](https://github.com/Free-cat/dynapins-ios/discussions)
+**Q: Can I pin multiple domains?**  
+A: Yes, pass an array of domains to `initialize()`.
 
-## 📄 License
+**Q: Does it work with Alamofire/Moya/other networking libraries?**  
+A: Yes, if they use URLSession internally. Pass `DynamicPinning.session()` to them.
 
-MIT License - Copyright (c) 2025 Artem Melnikov
+**Q: How often are pins refreshed?**  
+A: On first access and when SSL validation fails. You can also call `refreshPins()` manually.
 
-See [LICENSE](./LICENSE) for full details.
+**Q: What about certificate rotation?**  
+A: Enable `includeBackupPins: true` to fetch backup pins for seamless rotation.
+
+## Troubleshooting
+
+### SSL Pinning Fails
+
+```
+❌ [DynamicPinning] TrustKit validation failed for: api.example.com
+```
+
+**Solutions:**
+1. Check that domain is in `ALLOWED_DOMAINS` on server
+2. Verify `signingPublicKey` matches server's private key
+3. Ensure server is reachable from the device
+4. Check logs for JWS verification errors
+
+### Initialization Issues
+
+```
+⚠️ [DynamicPinning] Failed to verify pins for example.com: invalidPublicKey
+```
+
+**Solutions:**
+1. Verify public key format (Base64, no headers/footers)
+2. Check that key is ES256 (not Ed25519 or RSA)
+3. Ensure server is returning valid JWS tokens
+
+### Enable Debug Logging
+
+Set a symbolic breakpoint on `NSLog` with condition:
+```
+(BOOL)[$arg1 containsString:@"[DynamicPinning]"]
+```
+
+Or check Console.app for logs starting with `[DynamicPinning]`.
+
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+**Quick Contribution Guide:**
+1. Fork the repo
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make changes and add tests
+4. Run tests: `make test`
+5. Commit: `git commit -m "feat: add something"`
+6. Push and open a Pull Request
+
+## Support
+
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/Free-cat/dynapins-ios/issues)
+- 💬 **Questions**: [GitHub Discussions](https://github.com/Free-cat/dynapins-ios/discussions)
+- 📧 **Security Issues**: security@example.com (private disclosure)
+
+## Related Projects
+
+- [**Dynapins Server**](https://github.com/Free-cat/dynapins-server) - Go backend for serving signed pins
+- [**Dynapins Android**](https://github.com/Free-cat/dynapins-android) - Android SDK (coming soon)
+
+## License
+
+This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+Built with these excellent open-source libraries:
+- [TrustKit](https://github.com/datatheorem/TrustKit) by Data Theorem
+- [JOSESwift](https://github.com/airsidemobile/JOSESwift) by Airside Mobile
 
 ---
 
-**Built with ❤️ by [Free-cat](https://github.com/Free-cat) for iOS developers who care about security**
+<p align="center">
+  <strong>Made with ❤️ for secure iOS apps</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Free-cat">GitHub</a> •
+  <a href="https://github.com/Free-cat/dynapins-ios/issues">Issues</a> •
+  <a href="https://github.com/Free-cat/dynapins-ios/discussions">Discussions</a>
+</p>

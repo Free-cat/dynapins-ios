@@ -28,20 +28,13 @@ final class NetworkServiceTests: XCTestCase {
         XCTAssertNotNil(service)
     }
     
-    // MARK: - Response Decoding Tests
+    // MARK: - Response Decoding Tests (JWS Format)
     
-    func testFingerprintResponseDecoding() throws {
+    func testJWSResponseDecoding() throws {
         // Given
         let json = """
         {
-            "domain": "*.example.com",
-            "pins": ["a1b2c3d4e5f6g7h8", "x9y8z7w6v5u4t3s2"],
-            "created": "2025-10-17T11:00:00Z",
-            "expires": "2025-10-17T12:00:00Z",
-            "ttl_seconds": 86400,
-            "keyId": "test-key",
-            "alg": "Ed25519",
-            "signature": "dGVzdF9zaWduYXR1cmU="
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6IjdmZGE0YzFlIn0.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiODhjMzI5Li4uIl0sImlhdCI6MTczNDQ0MTYwMCwiZXhwIjoxNzM0NDQ1MjAwLCJ0dGxfc2Vjb25kcyI6MzYwMH0.SIGNATURE_BYTES"
         }
         """
         let jsonData = json.data(using: .utf8)!
@@ -51,81 +44,156 @@ final class NetworkServiceTests: XCTestCase {
         let response = try decoder.decode(NetworkService.FingerprintResponse.self, from: jsonData)
         
         // Then
-        XCTAssertEqual(response.domain, "*.example.com")
-        XCTAssertEqual(response.pins.count, 2)
-        XCTAssertEqual(response.pins[0], "a1b2c3d4e5f6g7h8")
-        XCTAssertEqual(response.fingerprint, "a1b2c3d4e5f6g7h8") // Computed property
-        XCTAssertEqual(response.signature, "dGVzdF9zaWduYXR1cmU=")
-        XCTAssertEqual(response.ttlSeconds, 86400)
-        XCTAssertEqual(response.ttl, 86400) // Computed property
-        XCTAssertEqual(response.keyId, "test-key")
-        XCTAssertEqual(response.alg, "Ed25519")
-    }
-    
-    func testFingerprintResponseEncodingDecoding() throws {
-        // Given
-        let json = """
-        {
-            "domain": "api.example.com",
-            "pins": ["a1b2c3d4"],
-            "created": "2025-10-17T11:00:00Z",
-            "expires": "2025-10-17T12:00:00Z",
-            "ttl_seconds": 3600,
-            "keyId": "test",
-            "alg": "Ed25519",
-            "signature": "sig=="
-        }
-        """
-        let jsonData = json.data(using: .utf8)!
-        
-        // When
-        let decoder = JSONDecoder()
-        let response = try decoder.decode(NetworkService.FingerprintResponse.self, from: jsonData)
-        
-        let encoder = JSONEncoder()
-        let data = try encoder.encode(response)
-        
-        let redecoded = try decoder.decode(NetworkService.FingerprintResponse.self, from: data)
-        
-        // Then
-        XCTAssertEqual(redecoded.domain, response.domain)
-        XCTAssertEqual(redecoded.pins, response.pins)
-        XCTAssertEqual(redecoded.fingerprint, response.fingerprint)
-        XCTAssertEqual(redecoded.signature, response.signature)
-        XCTAssertEqual(redecoded.ttl, response.ttl)
+        XCTAssertNotNil(response.jws)
+        XCTAssertTrue(response.jws.contains("."))
     }
     
     // MARK: - Network Request Tests
     
-    // Note: These tests would require mocking URLSession or using a test server
-    // For production code, you would:
-    // 1. Use URLProtocol to mock network responses
-    // 2. Use a test server that returns known responses
-    // 3. Use dependency injection to swap URLSession for testing
-    
-    func testFetchFingerprintWithMockServer() {
-        // This test demonstrates the expected behavior
-        // In a real implementation, you would:
-        // 1. Set up a mock URLProtocol
-        // 2. Register it with URLSession
-        // 3. Return a predefined response
-        // 4. Verify the parsing and handling
+    func testFetchFingerprintSuccess() {
+        // Given
+        let expectation = self.expectation(description: "Fetch fingerprint")
+        let mockJWS = "eyJhbGciOiJFZERTQSIsImtpZCI6InRlc3QifQ.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwLCJ0dGxfc2Vjb25kcyI6MzYwMH0.c2lnbmF0dXJl"
+        let mockResponse = """
+        {"jws": "\(mockJWS)"}
+        """
         
-        // Expected behavior documented:
-        // - Successful response (200) should decode to FingerprintResponse
-        // - Network error should return .networkFailure
-        // - 404/500 should return .invalidStatusCode
-        // - Invalid JSON should return .decodingFailed
+        // Setup mock
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, mockResponse.data(using: .utf8)!)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: false) { result in
+            // Then
+            switch result {
+            case .success(let jwsToken):
+                XCTAssertEqual(jwsToken, mockJWS)
+            case .failure(let error):
+                XCTFail("Expected success, got error: \(error)")
+            }
+            expectation.fulfill()
+        }
+        
+        waitForExpectations(timeout: 1.0)
     }
     
-    func testFetchFingerprintErrorHandling() {
-        // This test would verify error handling for:
-        // - Network timeouts
-        // - Invalid URLs
-        // - Server errors
-        // - Malformed responses
+    func testFetchFingerprintNetworkError() {
+        // Given
+        let expectation = self.expectation(description: "Network error")
         
-        // These require mocking or integration tests with a test server
+        MockURLProtocol.requestHandler = { request in
+            throw NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet, userInfo: nil)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: false) { result in
+            // Then
+            switch result {
+            case .success:
+                XCTFail("Expected error, got success")
+            case .failure(let error):
+                guard case .networkFailure = error else {
+                    XCTFail("Expected networkFailure, got \(error)")
+                    return
+                }
+            }
+            expectation.fulfill()
+        }
+        
+        waitForExpectations(timeout: 1.0)
+    }
+    
+    func testFetchFingerprintInvalidStatusCode() {
+        // Given
+        let expectation = self.expectation(description: "Invalid status code")
+        
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 404,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: false) { result in
+            // Then
+            switch result {
+            case .success:
+                XCTFail("Expected error, got success")
+            case .failure(let error):
+                guard case .invalidStatusCode(let code) = error else {
+                    XCTFail("Expected invalidStatusCode, got \(error)")
+                    return
+                }
+                XCTAssertEqual(code, 404)
+            }
+            expectation.fulfill()
+        }
+        
+        waitForExpectations(timeout: 1.0)
+    }
+    
+    func testFetchFingerprintInvalidJSON() {
+        // Given
+        let expectation = self.expectation(description: "Invalid JSON")
+        let invalidJSON = "not valid json"
+        
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, invalidJSON.data(using: .utf8)!)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: false) { result in
+            // Then
+            switch result {
+            case .success:
+                XCTFail("Expected error, got success")
+            case .failure(let error):
+                guard case .decodingFailed = error else {
+                    XCTFail("Expected decodingFailed, got \(error)")
+                    return
+                }
+            }
+            expectation.fulfill()
+        }
+        
+        waitForExpectations(timeout: 1.0)
     }
     
     // MARK: - URL Configuration Tests
@@ -140,5 +208,240 @@ final class NetworkServiceTests: XCTestCase {
         // Then
         XCTAssertNotNil(service)
         // Note: serviceURL is private, but we verify it's used correctly in integration tests
+    }
+    
+    // MARK: - Query Parameters Tests
+    
+    func testFetchFingerprintIncludesDomainQueryParameter() {
+        // Given
+        let expectation = self.expectation(description: "Request includes domain param")
+        var capturedRequest: URLRequest?
+        
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            
+            let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJhcGkuZXhhbXBsZS5jb20iLCJwaW5zIjpbImFiYzEyMyJdLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAzNjAwLCJ0dGxfc2Vjb25kcyI6MzYwMH0.c2lnbmF0dXJl"
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            return (response, data)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "api.example.com", includeBackupPins: false) { _ in
+            expectation.fulfill()
+        }
+        
+        wait(for: [expectation], timeout: 1.0)
+        
+        // Then
+        XCTAssertNotNil(capturedRequest)
+        let components = URLComponents(url: capturedRequest!.url!, resolvingAgainstBaseURL: false)
+        let domainParam = components?.queryItems?.first { $0.name == "domain" }
+        
+        XCTAssertNotNil(domainParam, "Should include 'domain' query parameter")
+        XCTAssertEqual(domainParam?.value, "api.example.com")
+    }
+    
+    func testFetchFingerprintIncludesBackupPinsParameter() {
+        // Given
+        let expectation = self.expectation(description: "Request includes backup pins param")
+        var capturedRequest: URLRequest?
+        
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            
+            let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIiwiZGVmNDU2Il0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            return (response, data)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When - Request with includeBackupPins = true
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: true) { _ in
+            expectation.fulfill()
+        }
+        
+        wait(for: [expectation], timeout: 1.0)
+        
+        // Then
+        XCTAssertNotNil(capturedRequest)
+        let components = URLComponents(url: capturedRequest!.url!, resolvingAgainstBaseURL: false)
+        let backupParam = components?.queryItems?.first { $0.name == "include-backup-pins" }
+        
+        XCTAssertNotNil(backupParam, "Should include 'include-backup-pins' query parameter")
+        XCTAssertEqual(backupParam?.value, "true")
+    }
+    
+    func testFetchFingerprintWithoutBackupPinsParameter() {
+        // Given
+        let expectation = self.expectation(description: "Request without backup pins param")
+        var capturedRequest: URLRequest?
+        
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            
+            let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            return (response, data)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When - Request with includeBackupPins = false (default)
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: false) { _ in
+            expectation.fulfill()
+        }
+        
+        wait(for: [expectation], timeout: 1.0)
+        
+        // Then
+        XCTAssertNotNil(capturedRequest)
+        let components = URLComponents(url: capturedRequest!.url!, resolvingAgainstBaseURL: false)
+        let backupParam = components?.queryItems?.first { $0.name == "include-backup-pins" }
+        
+        XCTAssertNil(backupParam, "Should NOT include 'include-backup-pins' when false")
+    }
+    
+    // MARK: - HTTP Headers Tests
+    
+    func testFetchFingerprintIncludesAcceptHeader() {
+        // Given
+        let expectation = self.expectation(description: "Request includes Accept header")
+        var capturedRequest: URLRequest?
+        
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            
+            let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            return (response, data)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: false) { _ in
+            expectation.fulfill()
+        }
+        
+        wait(for: [expectation], timeout: 1.0)
+        
+        // Then
+        XCTAssertNotNil(capturedRequest)
+        let acceptHeader = capturedRequest?.value(forHTTPHeaderField: "Accept")
+        XCTAssertEqual(acceptHeader, "application/json", "Should include Accept: application/json header")
+    }
+    
+    func testFetchFingerprintUsesGETMethod() {
+        // Given
+        let expectation = self.expectation(description: "Request uses GET method")
+        var capturedRequest: URLRequest?
+        
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            
+            let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            return (response, data)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: false) { _ in
+            expectation.fulfill()
+        }
+        
+        wait(for: [expectation], timeout: 1.0)
+        
+        // Then
+        XCTAssertNotNil(capturedRequest)
+        XCTAssertEqual(capturedRequest?.httpMethod, "GET", "Should use GET method")
+    }
+    
+    func testFetchFingerprintHasTimeout() {
+        // Given
+        let expectation = self.expectation(description: "Request has timeout")
+        var capturedRequest: URLRequest?
+        
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            
+            let mockJWS = "eyJhbGciOiJFUzI1NiJ9.eyJkb21haW4iOiJleGFtcGxlLmNvbSIsInBpbnMiOlsiYWJjMTIzIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDM2MDAsInR0bF9zZWNvbmRzIjozNjAwfQ.c2lnbmF0dXJl"
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let data = "{\"jws\":\"\(mockJWS)\"}".data(using: .utf8)!
+            return (response, data)
+        }
+        
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let mockSession = URLSession(configuration: config)
+        
+        // When
+        let service = NetworkService(serviceURL: testServiceURL, session: mockSession)
+        service.fetchFingerprint(forDomain: "example.com", includeBackupPins: false) { _ in
+            expectation.fulfill()
+        }
+        
+        wait(for: [expectation], timeout: 1.0)
+        
+        // Then
+        XCTAssertNotNil(capturedRequest)
+        XCTAssertEqual(capturedRequest?.timeoutInterval, 10, "Should have 10 second timeout")
+    }
+}
+
+// MARK: - Mock URLProtocol
+
+class MockURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    
+    override class func canInit(with request: URLRequest) -> Bool {
+        return true
+    }
+    
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        return request
+    }
+    
+    override func startLoading() {
+        guard let handler = MockURLProtocol.requestHandler else {
+            fatalError("Handler is unavailable.")
+        }
+        
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+    
+    override func stopLoading() {
+        // Required override
     }
 }

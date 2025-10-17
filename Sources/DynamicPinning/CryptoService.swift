@@ -1,303 +1,177 @@
 import CryptoKit
 import Foundation
+import JOSESwift
 import Security
 
-/// Service for cryptographic operations including signature verification and hashing.
+/// Service for cryptographic operations including JWT verification and hashing.
 @available(iOS 14.0, macOS 10.15, *)
 internal final class CryptoService {
+    
+    /// Clock function for getting current timestamp (injectable for testing)
+    private let currentTimestamp: () -> Int
+    
+    /// Initialize with default clock (current time)
+    init() {
+        self.currentTimestamp = { Int(Date().timeIntervalSince1970) }
+    }
+    
+    /// Initialize with custom clock for testing
+    init(currentTimestamp: @escaping () -> Int) {
+        self.currentTimestamp = currentTimestamp
+    }
     
     /// Errors that can occur during cryptographic operations
     enum CryptoError: Error {
         case invalidPublicKey
         case invalidSignature
         case signatureVerificationFailed
-        case unableToExtractPublicKey
-        case hashingFailed
+        case invalidJWSFormat
+        case tokenExpired
+        case invalidTimestamp
+        case invalidAlgorithm
+        case missingClaims
+        case domainMismatch(expected: String, actual: String)
     }
     
-    /// Represents the signable payload structure matching the Go server's SignablePayload
-    /// The order of fields MUST match the Go struct field order for signature verification
-    private struct SignablePayload: Encodable {
+    /// Represents the JWS payload structure from the backend
+    struct JWSPayload: Codable {
         let domain: String
         let pins: [String]
-        let created: String
-        let expires: String
+        let iat: Int
+        let exp: Int
         let ttlSeconds: Int
-        let keyId: String
-        let alg: String
         
         private enum CodingKeys: String, CodingKey {
-            case domain
-            case pins
-            case created
-            case expires
+            case domain, pins, iat, exp
             case ttlSeconds = "ttl_seconds"
-            case keyId
-            case alg
         }
     }
     
-    /// Extracts the raw Ed25519 public key from SPKI (SubjectPublicKeyInfo) format.
+    /// Verifies a JWS token and returns the decoded payload.
     ///
-    /// SPKI format includes a DER-encoded header before the raw key.
-    /// For Ed25519, the SPKI structure is:
-    /// - SEQUENCE (0x30)
-    ///   - SEQUENCE (algorithm identifier)
-    ///   - BIT STRING (0x03) containing the raw 32-byte public key
+    /// This function:
+    /// - Parses the JWS compact serialization format
+    /// - Validates the signature using the provided ECDSA P-256 public key with ES256
+    /// - Validates the expiration (exp) claim
+    /// - Validates the issued at (iat) claim with ±5 minute clock skew tolerance
+    /// - Verifies the algorithm is ES256
+    /// - Validates that the payload domain matches the expected domain
     ///
-    /// - Parameter spkiData: The SPKI-encoded public key data
-    /// - Returns: The raw 32-byte public key
-    /// - Throws: `CryptoError.invalidPublicKey` if extraction fails
-    private func extractRawPublicKey(from spkiData: Data) throws -> Data {
-        // For Ed25519, SPKI format is typically 44 bytes:
-        // 12 bytes header + 32 bytes raw key
-        // The raw key is the last 32 bytes
-        guard spkiData.count >= 32 else {
+    /// - Parameters:
+    ///   - jwsString: The JWS token in compact serialization format
+    ///   - publicKey: The ECDSA P-256 public key as a Base64-encoded string (SPKI format)
+    ///   - expectedDomain: The domain we requested pins for (optional, but recommended for security)
+    /// - Returns: The decoded and validated payload
+    /// - Throws: `CryptoError` if verification fails
+    func verifyJWS(jwsString: String, publicKey: String, expectedDomain: String? = nil) throws -> JWSPayload {
+        // Parse the JWS compact serialization
+        guard let jws = try? JWS(compactSerialization: jwsString) else {
+            throw CryptoError.invalidJWSFormat
+        }
+        
+        // Extract and log kid for observability (for future key rotation support)
+        if let kid = jws.header.kid {
+            NSLog("[DynamicPinning] JWS token kid: \(kid)")
+        }
+        
+        // Verify algorithm is ES256
+        guard jws.header.algorithm == .ES256 else {
+            NSLog("[DynamicPinning] Expected ES256, got: \(jws.header.algorithm?.rawValue ?? "unknown")")
+            throw CryptoError.invalidAlgorithm
+        }
+        
+        // Decode the ECDSA P-256 public key from Base64 (SPKI format)
+        guard let publicKeyData = Data(base64Encoded: publicKey) else {
+            NSLog("[DynamicPinning] Failed to decode public key from Base64")
             throw CryptoError.invalidPublicKey
         }
         
-        // Extract the last 32 bytes (the raw Ed25519 public key)
-        let rawKey = spkiData.suffix(32)
-        return rawKey
-    }
-    
-    /// Verifies an Ed25519 signature for a network service response payload.
-    ///
-    /// - Parameters:
-    ///   - response: The fingerprint response containing the payload and signature
-    ///   - publicKey: The Ed25519 public key as a Base64-encoded string (SPKI format)
-    /// - Returns: `true` if the signature is valid, `false` otherwise
-    /// - Throws: `CryptoError` if the operation fails
-    func verifySignatureForPayload(response: NetworkService.FingerprintResponse, publicKey: String) throws -> Bool {
-        // IMPORTANT: We must construct JSON manually to match Go's json.Marshal output
-        // Go preserves struct field order, but Swift's JSONEncoder sorts keys alphabetically
-        // The exact byte-for-byte match is required for Ed25519 signature verification
-        
-        // Escape JSON strings
-        func escapeJSON(_ str: String) -> String {
-            var escaped = str
-            escaped = escaped.replacingOccurrences(of: "\\", with: "\\\\")
-            escaped = escaped.replacingOccurrences(of: "\"", with: "\\\"")
-            escaped = escaped.replacingOccurrences(of: "\n", with: "\\n")
-            escaped = escaped.replacingOccurrences(of: "\r", with: "\\r")
-            escaped = escaped.replacingOccurrences(of: "\t", with: "\\t")
-            return escaped
+        // Create P256.Signing.PublicKey from DER (SPKI) representation using CryptoKit
+        // This requires iOS 14.0+ / macOS 11.0+
+        let p256Key: P256.Signing.PublicKey
+        do {
+            p256Key = try P256.Signing.PublicKey(derRepresentation: publicKeyData)
+        } catch {
+            NSLog("[DynamicPinning] Failed to create P256 key from DER: \(error)")
+            throw CryptoError.invalidPublicKey
         }
         
-        // Build JSON manually in the exact order as Go struct
-        var jsonString = "{"
-        jsonString += "\"domain\":\"\(escapeJSON(response.domain))\","
+        // Convert to SecKey using x963 representation for JOSESwift
+        let x963Data = p256Key.x963Representation
+        var secError: Unmanaged<CFError>?
+        let attributes: [String: Any] = [
+            kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+            kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
+            kSecAttrKeySizeInBits as String: 256
+        ]
         
-        // Pins array
-        jsonString += "\"pins\":["
-        let pinsJSON = response.pins.map { "\"\(escapeJSON($0))\"" }.joined(separator: ",")
-        jsonString += pinsJSON
-        jsonString += "],"
+        guard let secKey = SecKeyCreateWithData(x963Data as CFData, attributes as CFDictionary, &secError) else {
+            if let error = secError?.takeRetainedValue() {
+                NSLog("[DynamicPinning] Failed to create SecKey from x963: \(error)")
+            }
+            throw CryptoError.invalidPublicKey
+        }
         
-        jsonString += "\"created\":\"\(escapeJSON(response.created ?? ""))\","
-        jsonString += "\"expires\":\"\(escapeJSON(response.expires ?? ""))\","
-        jsonString += "\"ttl_seconds\":\(response.ttlSeconds),"
-        jsonString += "\"keyId\":\"\(escapeJSON(response.keyId ?? ""))\","
-        jsonString += "\"alg\":\"\(escapeJSON(response.alg ?? "Ed25519"))\""
-        jsonString += "}"
+        // Create EC public key verifier using JOSESwift
+        guard let verifier = Verifier(verifyingAlgorithm: .ES256, key: secKey) else {
+            NSLog("[DynamicPinning] Failed to create Verifier for ES256")
+            throw CryptoError.invalidPublicKey
+        }
         
-        guard let jsonData = jsonString.data(using: .utf8) else {
+        // Verify the JWS signature using JOSESwift native verification
+        let payload: Payload
+        do {
+            payload = try jws.validate(using: verifier).payload
+        } catch {
+            NSLog("[DynamicPinning] JWS signature verification failed: \(error)")
             throw CryptoError.signatureVerificationFailed
         }
         
-        // Decode the public key from Base64
-        guard let publicKeyData = Data(base64Encoded: publicKey) else {
-            throw CryptoError.invalidPublicKey
+        // Decode the payload
+        let payloadData = payload.data()
+        
+        let decoder = JSONDecoder()
+        let decodedPayload: JWSPayload
+        do {
+            decodedPayload = try decoder.decode(JWSPayload.self, from: payloadData)
+        } catch {
+            NSLog("[DynamicPinning] Failed to decode JWS payload: \(error)")
+            throw CryptoError.missingClaims
         }
         
-        // Extract raw key from SPKI format
-        let rawPublicKey = try extractRawPublicKey(from: publicKeyData)
+        // Validate timestamps using injected clock
+        let now = currentTimestamp()
+        let clockSkewTolerance = 300 // 5 minutes
         
-        // Create a Curve25519 public key from raw representation
-        guard let verifyingKey = try? Curve25519.Signing.PublicKey(rawRepresentation: rawPublicKey) else {
-            throw CryptoError.invalidPublicKey
+        // Check if token is not expired
+        guard decodedPayload.exp > now else {
+            NSLog("[DynamicPinning] Token expired: exp=\(decodedPayload.exp), now=\(now)")
+            throw CryptoError.tokenExpired
         }
         
-        // Decode the signature from Base64
-        guard let signatureData = Data(base64Encoded: response.signature) else {
-            throw CryptoError.invalidSignature
+        // Check if iat is not too far in the future (with clock skew tolerance)
+        guard decodedPayload.iat <= now + clockSkewTolerance else {
+            NSLog("[DynamicPinning] Token iat too far in future: iat=\(decodedPayload.iat), now=\(now)")
+            throw CryptoError.invalidTimestamp
         }
         
-        // Verify the signature
-        let isValid = verifyingKey.isValidSignature(signatureData, for: jsonData)
+        // Validate domain match if expectedDomain is provided
+        if let expectedDomain = expectedDomain {
+            let normalizedExpected = expectedDomain.lowercased()
+            let normalizedActual = decodedPayload.domain.lowercased()
+            
+            // Check exact match or wildcard match
+            let isMatch = normalizedExpected == normalizedActual ||
+                          (normalizedActual.hasPrefix("*.") && 
+                           normalizedExpected.hasSuffix(String(normalizedActual.dropFirst(2))))
+            
+            guard isMatch else {
+                NSLog("[DynamicPinning] Domain mismatch: expected=\(expectedDomain), actual=\(decodedPayload.domain)")
+                throw CryptoError.domainMismatch(expected: expectedDomain, actual: decodedPayload.domain)
+            }
+        }
         
-        return isValid
+        return decodedPayload
     }
     
-    /// Verifies an Ed25519 signature for the given message.
-    ///
-    /// - Parameters:
-    ///   - message: The message that was signed
-    ///   - signature: The Ed25519 signature as a Base64-encoded string
-    ///   - publicKey: The Ed25519 public key as a Base64-encoded string (SPKI format)
-    /// - Returns: `true` if the signature is valid, `false` otherwise
-    /// - Throws: `CryptoError` if the operation fails
-    func verifySignature(message: String, signature: String, publicKey: String) throws -> Bool {
-        // Decode the public key from Base64
-        guard let publicKeyData = Data(base64Encoded: publicKey) else {
-            throw CryptoError.invalidPublicKey
-        }
-        
-        // Extract raw key from SPKI format
-        let rawPublicKey = try extractRawPublicKey(from: publicKeyData)
-        
-        // Create a Curve25519 public key from raw representation
-        guard let verifyingKey = try? Curve25519.Signing.PublicKey(rawRepresentation: rawPublicKey) else {
-            throw CryptoError.invalidPublicKey
-        }
-        
-        // Decode the signature from Base64
-        guard let signatureData = Data(base64Encoded: signature) else {
-            throw CryptoError.invalidSignature
-        }
-        
-        // Convert message to data
-        guard let messageData = message.data(using: .utf8) else {
-            throw CryptoError.signatureVerificationFailed
-        }
-        
-        // Verify the signature
-        let isValid = verifyingKey.isValidSignature(signatureData, for: messageData)
-        
-        return isValid
-    }
-    
-    /// Computes the SHA-256 hash of a certificate's public key in SPKI (SubjectPublicKeyInfo) format.
-    ///
-    /// This matches the server's implementation which hashes the DER-encoded SPKI.
-    /// SPKI format includes the algorithm identifier and the public key, which is the
-    /// standard format for certificate pinning.
-    ///
-    /// - Parameter serverTrust: The server trust object containing the certificate
-    /// - Returns: The SHA-256 hash as a hex-encoded string
-    /// - Throws: `CryptoError` if unable to extract or hash the public key
-    func hashPublicKey(fromServerTrust serverTrust: SecTrust) throws -> String {
-        // Get the certificate chain
-        guard let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else {
-            throw CryptoError.unableToExtractPublicKey
-        }
-        
-        // Extract the public key from the certificate
-        guard let publicKey = SecCertificateCopyKey(certificate) else {
-            throw CryptoError.unableToExtractPublicKey
-        }
-        
-        // Get the SPKI (SubjectPublicKeyInfo) representation in DER format
-        // This is the standard format that includes the algorithm identifier
-        var error: Unmanaged<CFError>?
-        
-        // Verify that the public key can be exported
-        guard SecKeyCopyExternalRepresentation(publicKey, &error) != nil else {
-            throw CryptoError.unableToExtractPublicKey
-        }
-        
-        // For proper SPKI hashing, we need to construct the full SPKI structure
-        // However, SecKeyCopyExternalRepresentation returns different formats:
-        // - For RSA: PKCS#1 format (raw key without algorithm identifier)
-        // - For EC: X9.63 format (raw key)
-        // We need to convert to SPKI format by getting the certificate data directly
-        
-        // Get certificate data
-        let certificateData = SecCertificateCopyData(certificate) as Data
-        
-        // Parse certificate to extract SPKI
-        // For simplicity and correctness, we'll hash the public key in SPKI format
-        // by extracting it from the certificate's DER encoding
-        guard let spkiData = extractSPKIFromCertificate(certificateData) else {
-            throw CryptoError.unableToExtractPublicKey
-        }
-        
-        // Compute SHA-256 hash of SPKI
-        let hash = SHA256.hash(data: spkiData)
-        
-        // Convert to hex string
-        let hashString = hash.map { String(format: "%02x", $0) }.joined()
-        
-        return hashString
-    }
-    
-    /// Extracts the SubjectPublicKeyInfo (SPKI) from an X.509 certificate.
-    ///
-    /// X.509 Certificate structure (simplified):
-    /// ```
-    /// Certificate ::= SEQUENCE {
-    ///     tbsCertificate       TBSCertificate,
-    ///     ...
-    /// }
-    /// TBSCertificate ::= SEQUENCE {
-    ///     version         [0]  EXPLICIT Version DEFAULT v1,
-    ///     serialNumber         CertificateSerialNumber,
-    ///     signature            AlgorithmIdentifier,
-    ///     issuer               Name,
-    ///     validity             Validity,
-    ///     subject              Name,
-    ///     subjectPublicKeyInfo SubjectPublicKeyInfo,  <-- We want this
-    ///     ...
-    /// }
-    /// ```
-    ///
-    /// - Parameter certificateData: The DER-encoded X.509 certificate
-    /// - Returns: The SPKI bytes, or nil if parsing fails
-    private func extractSPKIFromCertificate(_ certificateData: Data) -> Data? {
-        var parser = DERParser(data: certificateData)
-        
-        // Parse outer certificate SEQUENCE
-        guard parser.skipSequence() else { return nil }
-        
-        // Parse TBSCertificate SEQUENCE (we need to enter it, not skip)
-        guard parser.extractSequence() != nil else { return nil }
-        
-        // Navigate through TBSCertificate fields to reach SPKI
-        return navigateToSPKI(parser: &parser)
-    }
-    
-    /// Navigates through TBSCertificate fields to extract the SPKI.
-    private func navigateToSPKI(parser: inout DERParser) -> Data? {
-        // Skip optional version [0]
-        guard parser.skipOptionalExplicit(tag: 0xA0) else { return nil }
-        
-        // Skip serialNumber (INTEGER)
-        guard parser.skipInteger() else { return nil }
-        
-        // Skip signature AlgorithmIdentifier (SEQUENCE)
-        guard parser.skipSequence() else { return nil }
-        
-        // Skip issuer (SEQUENCE)
-        guard parser.skipSequence() else { return nil }
-        
-        // Skip validity (SEQUENCE)
-        guard parser.skipSequence() else { return nil }
-        
-        // Skip subject (SEQUENCE)
-        guard parser.skipSequence() else { return nil }
-        
-        // Extract subjectPublicKeyInfo (SEQUENCE)
-        return parser.extractSequence()
-    }
-    
-    /// Computes the SHA-256 hash of the given data.
-    ///
-    /// - Parameter data: The data to hash
-    /// - Returns: The SHA-256 hash as a hex-encoded string
-    func sha256Hash(of data: Data) -> String {
-        let hash = SHA256.hash(data: data)
-        return hash.map { String(format: "%02x", $0) }.joined()
-    }
-    
-    /// Computes the SHA-256 hash of the given string.
-    ///
-    /// - Parameter string: The string to hash
-    /// - Returns: The SHA-256 hash as a hex-encoded string
-    /// - Throws: `CryptoError` if the string cannot be converted to data
-    func sha256Hash(of string: String) throws -> String {
-        guard let data = string.data(using: .utf8) else {
-            throw CryptoError.hashingFailed
-        }
-        return sha256Hash(of: data)
-    }
 }

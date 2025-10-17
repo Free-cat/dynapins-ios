@@ -10,33 +10,31 @@ internal final class NetworkService {
         case invalidResponse
         case invalidStatusCode(Int)
         case decodingFailed(Error)
+        case unknown
     }
     
-    /// Response from the fingerprint service
+    /// Response from the fingerprint service (JWS format)
     struct FingerprintResponse: Codable {
+        /// The JWS token containing the signed pin data
+        let jws: String
+    }
+    
+    /// Decoded fingerprint data from JWS payload
+    struct FingerprintData {
         /// The domain pattern this fingerprint applies to (e.g., "*.example.com")
         let domain: String
         
         /// Array of SHA-256 hashes of the certificate's public keys (hex-encoded)
         let pins: [String]
         
-        /// ISO8601 creation timestamp
-        let created: String?
+        /// Issued at timestamp (Unix epoch seconds)
+        let iat: Int
         
-        /// ISO8601 expiration timestamp
-        let expires: String?
+        /// Expiration timestamp (Unix epoch seconds)
+        let exp: Int
         
         /// Time-to-live in seconds for this fingerprint
         let ttlSeconds: Int
-        
-        /// Key ID for the signing key
-        let keyId: String?
-        
-        /// Algorithm used for signing (Ed25519)
-        let alg: String?
-        
-        /// The Ed25519 signature (Base64-encoded)
-        let signature: String
         
         /// Computed property for backwards compatibility
         var fingerprint: String {
@@ -48,40 +46,51 @@ internal final class NetworkService {
         var ttl: Int {
             ttlSeconds
         }
-        
-        private enum CodingKeys: String, CodingKey {
-            case domain
-            case pins
-            case created
-            case expires
-            case ttlSeconds = "ttl_seconds"
-            case keyId
-            case alg
-            case signature
-        }
     }
     
     private let serviceURL: URL
+    private let session: URLSession
     
     /// Creates a new network service instance.
     ///
-    /// - Parameter serviceURL: The base URL of the Dynapins service
-    init(serviceURL: URL) {
+    /// - Parameters:
+    ///   - serviceURL: The base URL of the Dynapins service
+    ///   - session: Optional URLSession for testing (defaults to ephemeral session)
+    init(serviceURL: URL, session: URLSession? = nil) {
         self.serviceURL = serviceURL
+        self.session = session ?? URLSession(configuration: .default)
     }
     
     /// Fetches a signed certificate fingerprint from the Dynapins service.
     ///
-    /// - Parameter completion: Completion handler called with the result
-    func fetchFingerprint(completion: @escaping (Result<FingerprintResponse, NetworkError>) -> Void) {
+    /// - Parameters:
+    ///   - forDomain: The domain to fetch fingerprint for (optional, if URL already includes it)
+    ///   - completion: Completion handler called with the result
+    func fetchFingerprint(
+        forDomain domain: String,
+        includeBackupPins: Bool,
+        completion: @escaping (Result<String, NetworkError>) -> Void
+    ) {
+        // Construct the URL with the domain query parameter
+        var components = URLComponents(url: serviceURL, resolvingAgainstBaseURL: false)
+        var queryItems = [URLQueryItem(name: "domain", value: domain)]
+
+        if includeBackupPins {
+            queryItems.append(URLQueryItem(name: "include-backup-pins", value: "true"))
+        }
+
+        components?.queryItems = queryItems
+        
+        guard let url = components?.url else {
+            completion(.failure(.invalidURL))
+            return
+        }
+        
         // Create the request
-        var request = URLRequest(url: serviceURL)
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        
-        // Create a URLSession without our custom delegate to avoid circular pinning
-        let session = URLSession(configuration: .default)
         
         let task = session.dataTask(with: request) { data, response, error in
             // Check for network errors
@@ -112,7 +121,7 @@ internal final class NetworkService {
             do {
                 let decoder = JSONDecoder()
                 let fingerprintResponse = try decoder.decode(FingerprintResponse.self, from: data)
-                completion(.success(fingerprintResponse))
+                completion(.success(fingerprintResponse.jws))
             } catch {
                 completion(.failure(.decodingFailed(error)))
             }
@@ -120,31 +129,34 @@ internal final class NetworkService {
         
         task.resume()
     }
-    
-    /// Fetches a fingerprint synchronously using a semaphore.
-    ///
-    /// - Returns: The fingerprint response
-    /// - Throws: `NetworkError` if the operation fails
-    ///
-    /// - Warning: This method blocks the current thread. Use with caution.
-    func fetchFingerprintSync() throws -> FingerprintResponse {
-        var result: Result<FingerprintResponse, NetworkError>?
+}
+
+// MARK: - Synchronous Fetching for Simpler Test Code
+
+@available(iOS 14.0, macOS 10.15, *)
+extension NetworkService {
+    /// Synchronous wrapper for `fetchFingerprint` for easier testing.
+    internal func fetchFingerprintSync(
+        forDomain domain: String,
+        includeBackupPins: Bool
+    ) throws -> String {
+        var result: Result<String, NetworkError>!
         let semaphore = DispatchSemaphore(value: 0)
-        
-        fetchFingerprint { response in
+
+        fetchFingerprint(forDomain: domain, includeBackupPins: includeBackupPins) { response in
             result = response
             semaphore.signal()
         }
-        
+
         semaphore.wait()
         
         switch result {
-        case .success(let response):
-            return response
+        case .success(let jwsToken):
+            return jwsToken
         case .failure(let error):
             throw error
         case .none:
-            throw NetworkError.invalidResponse
+            throw NetworkError.unknown
         }
     }
 }
