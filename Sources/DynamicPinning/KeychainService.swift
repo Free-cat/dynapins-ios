@@ -155,4 +155,3 @@ struct CachedFingerprint: Codable {
     /// The expiration date after which this fingerprint should not be used
     let expiresAt: Date
 }
-

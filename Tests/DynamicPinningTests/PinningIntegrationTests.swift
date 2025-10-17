@@ -1,5 +1,5 @@
-import XCTest
 @testable import DynamicPinning
+import XCTest
 
 /// End-to-end integration tests for the complete pinning flow.
 ///
@@ -95,7 +95,7 @@ final class PinningIntegrationTests: XCTestCase {
         var requestSuccess = false
         var requestError: Error?
         
-        let task = session.dataTask(with: requestURL) { data, response, error in
+        let task = session.dataTask(with: requestURL) { _, _, error in
             requestError = error
             requestSuccess = (error == nil)
             expectation.fulfill()
@@ -418,7 +418,7 @@ final class PinningIntegrationTests: XCTestCase {
         
         var isAvailable = false
         
-        let task = URLSession.shared.dataTask(with: serviceURL) { data, response, error in
+        let task = URLSession.shared.dataTask(with: serviceURL) { _, response, _ in
             if let httpResponse = response as? HTTPURLResponse {
                 isAvailable = (httpResponse.statusCode == 200)
             }
@@ -446,4 +446,3 @@ extension PinningIntegrationTests {
         print("=====================================")
     }
 }
-

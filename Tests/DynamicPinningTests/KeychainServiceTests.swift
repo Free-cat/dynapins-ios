@@ -1,5 +1,5 @@
-import XCTest
 @testable import DynamicPinning
+import XCTest
 
 /// Tests for the KeychainService class.
 @available(iOS 14.0, macOS 10.15, *)
@@ -198,4 +198,3 @@ final class KeychainServiceTests: XCTestCase {
         }
     }
 }
-

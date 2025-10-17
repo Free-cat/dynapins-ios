@@ -1,5 +1,5 @@
-import XCTest
 @testable import DynamicPinning
+import XCTest
 
 /// Tests for the CryptoService class.
 @available(iOS 14.0, macOS 10.15, *)
@@ -180,4 +180,3 @@ final class CryptoServiceTests: XCTestCase {
         XCTAssertTrue(hexCharacterSet.isSuperset(of: hashCharacterSet))
     }
 }
-

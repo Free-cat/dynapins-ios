@@ -22,4 +22,3 @@ public struct Configuration {
         self.serviceURL = serviceURL
     }
 }
-

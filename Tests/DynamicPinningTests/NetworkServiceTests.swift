@@ -1,5 +1,5 @@
-import XCTest
 @testable import DynamicPinning
+import XCTest
 
 /// Tests for the NetworkService class.
 @available(iOS 14.0, macOS 10.15, *)
@@ -142,4 +142,3 @@ final class NetworkServiceTests: XCTestCase {
         // Note: serviceURL is private, but we verify it's used correctly in integration tests
     }
 }
-

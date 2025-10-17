@@ -1,5 +1,5 @@
-import Foundation
 import CryptoKit
+import Foundation
 import Security
 
 /// Service for cryptographic operations including signature verification and hashing.
@@ -22,7 +22,7 @@ internal final class CryptoService {
         let pins: [String]
         let created: String
         let expires: String
-        let ttl_seconds: Int
+        let ttlSeconds: Int
         let keyId: String
         let alg: String
         
@@ -31,7 +31,7 @@ internal final class CryptoService {
             case pins
             case created
             case expires
-            case ttl_seconds
+            case ttlSeconds = "ttl_seconds"
             case keyId
             case alg
         }
@@ -278,12 +278,12 @@ internal final class CryptoService {
         // Skip outer SEQUENCE (Certificate)
         guard index < data.count, data[index] == 0x30 else { return nil } // SEQUENCE tag
         index += 1
-        guard let _ = readLength() else { return nil }
+        guard readLength() != nil else { return nil }
         
         // Skip TBSCertificate SEQUENCE tag
         guard index < data.count, data[index] == 0x30 else { return nil }
         index += 1
-        guard let _ = readLength() else { return nil }
+        guard readLength() != nil else { return nil }
         
         // Skip version (EXPLICIT [0])
         if index < data.count && data[index] == 0xA0 {
@@ -356,4 +356,3 @@ internal final class CryptoService {
         return sha256Hash(of: data)
     }
 }
-

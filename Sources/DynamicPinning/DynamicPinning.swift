@@ -131,4 +131,3 @@ public final class DynamicPinning {
     }
     #endif
 }
-

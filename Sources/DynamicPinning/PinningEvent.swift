@@ -44,4 +44,3 @@ public enum PinningFailureReason {
     /// Failed to extract or hash the server's public key from the certificate.
     case certificateProcessingFailed
 }
-

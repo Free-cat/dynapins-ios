@@ -1,5 +1,5 @@
-import XCTest
 @testable import DynamicPinning
+import XCTest
 
 /// Tests for SDK initialization logic.
 final class InitializationTests: XCTestCase {
@@ -149,4 +149,3 @@ final class InitializationTests: XCTestCase {
         XCTAssertEqual(config?.publicKey, publicKey)
     }
 }
-

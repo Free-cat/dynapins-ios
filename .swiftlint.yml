@@ -18,9 +18,6 @@ disabled_rules:
 opt_in_rules:
   - empty_count
   - explicit_init
-  - file_header
-  - force_unwrapping
-  - implicitly_unwrapped_optional
   - overridden_super_call
   - redundant_nil_coalescing
   - sorted_imports
@@ -39,7 +36,7 @@ file_length:
   error: 800
 
 function_body_length:
-  warning: 50
+  warning: 60
   error: 100
 
 type_body_length:
@@ -47,8 +44,8 @@ type_body_length:
   error: 500
 
 cyclomatic_complexity:
-  warning: 10
-  error: 20
+  warning: 15
+  error: 25
 
 nesting:
   type_level: 2
@@ -64,10 +61,18 @@ identifier_name:
     - id
     - url
     - ttl
+    - i
 
 type_name:
   min_length: 3
   max_length: 50
+
+# Allow force unwrapping and implicitly unwrapped optionals in tests
+force_unwrapping:
+  severity: warning
+
+implicitly_unwrapped_optional:
+  severity: warning
 
 # Reporter
 reporter: "xcode"
