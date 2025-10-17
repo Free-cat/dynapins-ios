@@ -78,11 +78,6 @@ jobs:
   test-ios:
     name: Test on iOS Simulator
     runs-on: macos-14
-    strategy:
-      matrix:
-        destination:
-          - 'platform=iOS Simulator,name=iPhone 15,OS=17.2'
-          - 'platform=iOS Simulator,name=iPhone 15 Pro,OS=17.2'
     
     steps:
     - name: Checkout code
@@ -93,30 +88,16 @@ jobs:
         sudo xcode-select -s /Applications/Xcode_15.2.app/Contents/Developer
         xcodebuild -version
       
+    - name: List available simulators
+      run: xcrun simctl list devices available | grep iPhone
+      
     - name: Run iOS Tests
       run: |
         xcodebuild test \
           -scheme DynamicPinning \
-          -destination '${{ matrix.destination }}' \
+          -destination 'platform=iOS Simulator,name=iPhone 15' \
           -skipPackagePluginValidation \
-          -enableCodeCoverage YES \
-          | xcpretty --test --color || true
-      
-    - name: Generate iOS code coverage
-      if: matrix.destination == 'platform=iOS Simulator,name=iPhone 15,OS=17.2'
-      run: |
-        xcrun llvm-cov export \
-          -instr-profile=$(find ~/Library/Developer/Xcode/DerivedData -name "*.profdata" | head -1) \
-          $(find ~/Library/Developer/Xcode/DerivedData -name "DynamicPinning" -type f | head -1) \
-          -format="lcov" > coverage-ios.lcov || true
-      
-    - name: Upload iOS coverage
-      if: matrix.destination == 'platform=iOS Simulator,name=iPhone 15,OS=17.2'
-      uses: codecov/codecov-action@v3
-      with:
-        files: ./coverage-ios.lcov
-        flags: ios
-        fail_ci_if_error: false
+          -enableCodeCoverage YES
 
   build-ios:
     name: Build for iOS
@@ -135,15 +116,13 @@ jobs:
       run: |
         xcodebuild build \
           -scheme DynamicPinning \
-          -destination 'platform=iOS Simulator,name=iPhone 15,OS=17.2' \
-          -skipPackagePluginValidation \
-          | xcpretty || true
+          -destination 'platform=iOS Simulator,name=iPhone 15' \
+          -skipPackagePluginValidation
       
     - name: Build for iOS Device
       run: |
         xcodebuild build \
           -scheme DynamicPinning \
           -destination 'generic/platform=iOS' \
-          -skipPackagePluginValidation \
-          | xcpretty || true
+          -skipPackagePluginValidation
 
