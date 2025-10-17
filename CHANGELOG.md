@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- Future enhancements and features
+
+## [0.0.1] - 2025-10-17
+
 ### Added
 - Initial release of DynamicPinning iOS SDK
 - Core certificate pinning functionality
@@ -20,19 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SwiftLint configuration
 - CI/CD workflows (GitHub Actions)
 - XCFramework build support
+- Full documentation and examples
+- SPM distribution support
 
 ### Security
 - Fail-closed validation (all errors terminate connections)
 - No external dependencies (only Apple frameworks)
 - Secure Keychain storage for cached fingerprints
 - Cryptographic signature verification for all fingerprints
-
-## [1.0.0] - TBD
-
-### Added
-- Initial public release
-- Full documentation and examples
-- SPM distribution support
 
 ---
 
@@ -64,8 +64,8 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 1. Update version in `Package.swift`
 2. Update this CHANGELOG.md
-3. Create a git tag: `git tag v1.0.0`
-4. Push tag: `git push origin v1.0.0`
+3. Create a git tag: `git tag v0.0.1`
+4. Push tag: `git push origin v0.0.1`
 5. GitHub Actions will automatically:
    - Build XCFramework
    - Create GitHub Release
