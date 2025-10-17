@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: macos-14
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Select Xcode
+      run: |
+        sudo xcode-select -s /Applications/Xcode_15.2.app/Contents/Developer
+        xcodebuild -version
+      
+    - name: Extract version from tag
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+    - name: Build XCFramework
+      run: |
+        # Build for iOS devices
+        xcodebuild archive \
+          -scheme DynamicPinning \
+          -destination 'generic/platform=iOS' \
+          -archivePath ./build/ios.xcarchive \
+          SKIP_INSTALL=NO \
+          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+        
+        # Build for iOS Simulator
+        xcodebuild archive \
+          -scheme DynamicPinning \
+          -destination 'generic/platform=iOS Simulator' \
+          -archivePath ./build/ios-simulator.xcarchive \
+          SKIP_INSTALL=NO \
+          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+        
+        # Create XCFramework
+        xcodebuild -create-xcframework \
+          -framework ./build/ios.xcarchive/Products/Library/Frameworks/DynamicPinning.framework \
+          -framework ./build/ios-simulator.xcarchive/Products/Library/Frameworks/DynamicPinning.framework \
+          -output ./build/DynamicPinning.xcframework
+        
+        # Create zip
+        cd build
+        zip -r DynamicPinning.xcframework.zip DynamicPinning.xcframework
+        cd ..
+      
+    - name: Calculate checksum
+      id: checksum
+      run: |
+        CHECKSUM=$(swift package compute-checksum ./build/DynamicPinning.xcframework.zip)
+        echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+        echo "Checksum: $CHECKSUM"
+      
+    - name: Generate Release Notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << EOF
+        ## DynamicPinning iOS SDK ${{ steps.version.outputs.version }}
+        
+        ### Installation
+        
+        #### Swift Package Manager
+        
+        Add to your \`Package.swift\`:
+        
+        \`\`\`swift
+        dependencies: [
+            .package(url: "https://github.com/Free-cat/dynapins-ios.git", from: "${{ steps.version.outputs.version }}")
+        ]
+        \`\`\`
+        
+        Or add via Xcode: File → Add Packages
+        
+        #### XCFramework
+        
+        Download \`DynamicPinning.xcframework.zip\` below and add to your Xcode project.
+        
+        **Checksum**: \`${{ steps.checksum.outputs.checksum }}\`
+        
+        ### What's New
+        
+        See [CHANGELOG.md](CHANGELOG.md) for details.
+        
+        ### Requirements
+        
+        - iOS 14.0+
+        - Swift 5.9+
+        - Xcode 15.0+
+        EOF
+      
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Release ${{ steps.version.outputs.tag }}
+        body_path: release_notes.md
+        files: |
+          ./build/DynamicPinning.xcframework.zip
+        draft: false
+        prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+    - name: Update Swift Package Index
+      run: |
+        echo "Release created. Swift Package Index will automatically detect the new tag."
+

@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Dynapins backend server for integration testing
+  dynapins-server:
+    image: freecats/dynapins-server:latest
+    container_name: dynapins-test-server
+    ports:
+      - "8080:8080"
+    environment:
+      # Allow common test domains
+      ALLOWED_DOMAINS: "example.com,*.example.com,httpbin.org,*.httpbin.org"
+      
+      # Test Ed25519 private key (DO NOT use in production!)
+      # This is a test-only key pair for integration testing
+      # Keypair is stored in test-keys/ directory
+      PRIVATE_KEY_PEM: |
+        -----BEGIN PRIVATE KEY-----
+        MC4CAQAwBQYDK2VwBCIEIEottsHhxfNBdKlEbCVOJZ0Pav1mfvjUruTuJMApfwjM
+        -----END PRIVATE KEY-----
+      
+      # Logging
+      LOG_LEVEL: "debug"
+      
+      # Timeouts
+      READ_TIMEOUT: "10s"
+      WRITE_TIMEOUT: "10s"
+      CERT_DIAL_TIMEOUT: "10s"
+      
+      # Signature lifetime
+      SIGNATURE_LIFETIME: "1h"
+    
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    
+    restart: unless-stopped
+
+# Note: The corresponding test public key is stored in test-keys/public_key_base64.txt
+# Public key (Base64-encoded SPKI format):
+# MCowBQYDK2VwAyEA9gocJEBHG+vcm2OH42ZEy8XiYarSBJ3ZBTA5Ni7J+Ac=
+#
+# Use this in your test environment:
+# export TEST_PUBLIC_KEY="MCowBQYDK2VwAyEA9gocJEBHG+vcm2OH42ZEy8XiYarSBJ3ZBTA5Ni7J+Ac="
+
