@@ -33,19 +33,19 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyValidJWS() throws {
         // Given - A properly signed JWS with valid claims
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "api.example.com",
             pins: ["abc123", "def456"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
         
         // When - Verifying with the correct public key
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64,
+            publicKey: testKeyPair!.publicKeyBase64,
             expectedDomain: "api.example.com"
         )
         
@@ -59,7 +59,7 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithMultiplePins() throws {
         // Given - JWS with multiple pins (primary + backups)
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let pins = [
             "pin1_primary",
             "pin2_backup1",
@@ -69,15 +69,15 @@ final class CryptoServiceTests: XCTestCase {
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "cdn.example.com",
             pins: pins,
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 7200
         )
         
         // When
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64
+            publicKey: testKeyPair!.publicKeyBase64
         )
         
         // Then
@@ -87,20 +87,20 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithKid() throws {
         // Given - JWS with key ID in header
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "example.com",
             pins: ["test_pin"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600,
             kid: "test-key-2024-01"
         )
         
         // When
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64
+            publicKey: testKeyPair!.publicKeyBase64
         )
         
         // Then
@@ -111,11 +111,11 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithWrongPublicKey() throws {
         // Given - JWS signed with one key, but verified with another
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
@@ -125,7 +125,7 @@ final class CryptoServiceTests: XCTestCase {
         
         // When/Then - Should fail signature verification
         XCTAssertThrowsError(
-            try cryptoService.verifyJWS(
+            try cryptoService!.verifyJWS(
                 jwsString: jwsToken,
                 publicKey: otherKeyPair.publicKeyBase64
             )
@@ -139,11 +139,11 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithTamperedPayload() throws {
         // Given - A valid JWS with tampered payload
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         var jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "example.com",
             pins: ["original_pin"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
@@ -152,20 +152,20 @@ final class CryptoServiceTests: XCTestCase {
         let parts = jwsToken.split(separator: ".")
         if parts.count == 3 {
             let tamperedPayload = "{\"domain\":\"hacked.com\",\"pins\":[\"fake\"],\"iat\":\(now),\"exp\":\(now + 3600),\"ttl_seconds\":3600}"
-                .data(using: .utf8) ?? Data()
-                .base64EncodedString()
+            let tamperedData = tamperedPayload.data(using: .utf8) ?? Data()
+            let tamperedBase64 = tamperedData.base64EncodedString()
                 .replacingOccurrences(of: "+", with: "-")
                 .replacingOccurrences(of: "/", with: "_")
                 .replacingOccurrences(of: "=", with: "")
             
-            jwsToken = "\(parts[0]).\(tamperedPayload).\(parts[2])"
+            jwsToken = "\(parts[0]).\(tamperedBase64).\(parts[2])"
         }
         
         // When/Then - Should fail signature verification
         XCTAssertThrowsError(
-            try cryptoService.verifyJWS(
+            try cryptoService!.verifyJWS(
                 jwsString: jwsToken,
-                publicKey: testKeyPair.publicKeyBase64
+                publicKey: testKeyPair!.publicKeyBase64
             )
         ) { error in
             guard case CryptoService.CryptoError.signatureVerificationFailed = error else {
@@ -179,20 +179,20 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyExpiredJWS() throws {
         // Given - JWS that expired 1 hour ago
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now - 7200,  // Issued 2 hours ago
             exp: now - 3600   // Expired 1 hour ago
         )
         
         // When/Then - Should throw tokenExpired
         XCTAssertThrowsError(
-            try cryptoService.verifyJWS(
+            try cryptoService!.verifyJWS(
                 jwsString: jwsToken,
-                publicKey: testKeyPair.publicKeyBase64
+                publicKey: testKeyPair!.publicKeyBase64
             )
         ) { error in
             guard case CryptoService.CryptoError.tokenExpired = error else {
@@ -204,19 +204,19 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSExpiringInOneSecond() throws {
         // Given - JWS that expires in 1 second (should still be valid)
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now - 3599,
             exp: now + 1  // Expires in 1 second
         )
         
         // When - Should succeed (not expired yet)
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64
+            publicKey: testKeyPair!.publicKeyBase64
         )
         
         // Then
@@ -225,19 +225,19 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithFutureIatWithinSkew() throws {
         // Given - JWS with iat 4 minutes in future (within 5 min tolerance)
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now + 240,  // 4 minutes in future (within tolerance)
             exp: now + 3840
         )
         
         // When - Should succeed (within clock skew tolerance)
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64
+            publicKey: testKeyPair!.publicKeyBase64
         )
         
         // Then
@@ -246,20 +246,20 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithFutureIatBeyondSkew() throws {
         // Given - JWS with iat 6 minutes in future (beyond 5 min tolerance)
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now + 360,  // 6 minutes in future (beyond tolerance)
             exp: now + 3960
         )
         
         // When/Then - Should throw invalidTimestamp
         XCTAssertThrowsError(
-            try cryptoService.verifyJWS(
+            try cryptoService!.verifyJWS(
                 jwsString: jwsToken,
-                publicKey: testKeyPair.publicKeyBase64
+                publicKey: testKeyPair!.publicKeyBase64
             )
         ) { error in
             guard case CryptoService.CryptoError.invalidTimestamp = error else {
@@ -273,19 +273,19 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithMatchingDomain() throws {
         // Given - JWS for "api.example.com"
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "api.example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
         
         // When - Request for the same domain
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64,
+            publicKey: testKeyPair!.publicKeyBase64,
             expectedDomain: "api.example.com"
         )
         
@@ -295,20 +295,20 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithDomainMismatch() throws {
         // Given - JWS for "api.example.com"
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "api.example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
         
         // When/Then - Request for different domain should fail
         XCTAssertThrowsError(
-            try cryptoService.verifyJWS(
+            try cryptoService!.verifyJWS(
                 jwsString: jwsToken,
-                publicKey: testKeyPair.publicKeyBase64,
+                publicKey: testKeyPair!.publicKeyBase64,
                 expectedDomain: "cdn.different.com"
             )
         ) { error in
@@ -323,19 +323,19 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithWildcardDomain() throws {
         // Given - JWS with wildcard domain "*.example.com"
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "*.example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
         
         // When - Request for "api.example.com" (should match wildcard)
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64,
+            publicKey: testKeyPair!.publicKeyBase64,
             expectedDomain: "api.example.com"
         )
         
@@ -346,20 +346,20 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithWildcardDomainMismatch() throws {
         // Given - JWS with wildcard "*.example.com"
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "*.example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
         
         // When/Then - Request for "other.com" should fail
         XCTAssertThrowsError(
-            try cryptoService.verifyJWS(
+            try cryptoService!.verifyJWS(
                 jwsString: jwsToken,
-                publicKey: testKeyPair.publicKeyBase64,
+                publicKey: testKeyPair!.publicKeyBase64,
                 expectedDomain: "other.com"
             )
         ) { error in
@@ -372,19 +372,19 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithCaseInsensitiveDomain() throws {
         // Given - JWS for "API.EXAMPLE.COM" (uppercase)
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "API.EXAMPLE.COM",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
         
         // When - Request for "api.example.com" (lowercase) should match
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64,
+            publicKey: testKeyPair!.publicKeyBase64,
             expectedDomain: "api.example.com"
         )
         
@@ -394,19 +394,19 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithoutExpectedDomain() throws {
         // Given - JWS for any domain
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "any.domain.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
         
         // When - Don't provide expectedDomain (domain check skipped)
-        let payload = try cryptoService.verifyJWS(
+        let payload = try cryptoService!.verifyJWS(
             jwsString: jwsToken,
-            publicKey: testKeyPair.publicKeyBase64,
+            publicKey: testKeyPair!.publicKeyBase64,
             expectedDomain: nil
         )
         
@@ -429,7 +429,7 @@ final class CryptoServiceTests: XCTestCase {
         // When/Then - All should throw invalidJWSFormat
         for token in invalidTokens {
             XCTAssertThrowsError(
-                try cryptoService.verifyJWS(jwsString: token, publicKey: testKeyPair.publicKeyBase64)
+                try cryptoService!.verifyJWS(jwsString: token, publicKey: testKeyPair!.publicKeyBase64)
             ) { error in
                 guard case CryptoService.CryptoError.invalidJWSFormat = error else {
                     XCTFail("Expected invalidJWSFormat for '\(token)', got \(error)")
@@ -441,11 +441,11 @@ final class CryptoServiceTests: XCTestCase {
     
     func testVerifyJWSWithInvalidPublicKey() throws {
         // Given - Valid JWS but invalid public keys
-        let now = fixedClock.now()
+        let now = fixedClock!.now()
         let jwsToken = try JWSTestHelper.createSignedFingerprint(
             domain: "example.com",
             pins: ["pin123"],
-            privateKey: testKeyPair.privateKey,
+            privateKey: testKeyPair!.privateKey,
             iat: now,
             exp: now + 3600
         )
@@ -459,7 +459,7 @@ final class CryptoServiceTests: XCTestCase {
         // When/Then - Should throw invalidPublicKey or related error
         for key in invalidKeys {
             XCTAssertThrowsError(
-                try cryptoService.verifyJWS(jwsString: jwsToken, publicKey: key)
+                try cryptoService!.verifyJWS(jwsString: jwsToken, publicKey: key)
             ) { error in
                 XCTAssertTrue(error is CryptoService.CryptoError, "Expected CryptoError for key '\(key)', got \(error)")
             }
@@ -475,7 +475,7 @@ final class CryptoServiceTests: XCTestCase {
         
         // When/Then - Should throw invalidAlgorithm or invalidJWSFormat
         XCTAssertThrowsError(
-            try cryptoService.verifyJWS(jwsString: jwsWithWrongAlg, publicKey: testKeyPair.publicKeyBase64)
+            try cryptoService!.verifyJWS(jwsString: jwsWithWrongAlg, publicKey: testKeyPair!.publicKeyBase64)
         ) { error in
             // Algorithm validation happens early in parsing
             XCTAssertTrue(error is CryptoService.CryptoError, "Expected CryptoError, got \(error)")
