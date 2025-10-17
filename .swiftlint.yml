@@ -22,6 +22,9 @@ opt_in_rules:
   - redundant_nil_coalescing
   - sorted_imports
   - strict_fileprivate
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - non_optional_string_data_conversion
 
 # Rule configurations
 line_length:
@@ -67,11 +70,14 @@ type_name:
   min_length: 3
   max_length: 50
 
-# Allow force unwrapping and implicitly unwrapped optionals in tests
+# Allow some violations in tests (not production code)
 force_unwrapping:
   severity: warning
 
 implicitly_unwrapped_optional:
+  severity: warning
+
+non_optional_string_data_conversion:
   severity: warning
 
 # Reporter

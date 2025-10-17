@@ -83,98 +83,96 @@ internal final class PinningDelegate: NSObject, URLSessionDelegate {
                 return
             }
             
-            // Step 1: Check for cached fingerprint
-            var cachedFingerprint: CachedFingerprint?
-            
-            do {
-                cachedFingerprint = try self.keychainService.loadFingerprint(forDomain: host)
-            } catch {
-                // Keychain error, fail closed
-                NSLog("[DynamicPinning] Keychain error: \(error)")
-                self.emitEvent(.failure(domain: host, reason: .keychainError))
+            guard let fingerprint = self.obtainFingerprint(forHost: host) else {
                 completion(false)
                 return
             }
             
-            // Step 2: If not cached, fetch from service
-            if cachedFingerprint == nil {
-                self.emitEvent(.cacheMiss(domain: host))
-                
-                do {
-                    let response = try self.networkService.fetchFingerprintSync()
-                    
-                    // Step 3: Verify signature
-                    // The signature covers the entire payload, not just the fingerprint
-                    let isSignatureValid = try self.cryptoService.verifySignatureForPayload(
-                        response: response,
-                        publicKey: self.configuration.publicKey
-                    )
-                    
-                    guard isSignatureValid else {
-                        NSLog("[DynamicPinning] Signature verification failed for domain: \(host)")
-                        self.emitEvent(.failure(domain: host, reason: .signatureVerificationFailed))
-                        completion(false)
-                        return
-                    }
-                    
-                    // Step 4: Check wildcard domain matching
-                    guard self.matchesDomain(host, pattern: response.domain) else {
-                        NSLog("[DynamicPinning] Domain mismatch: \(host) does not match \(response.domain)")
-                        self.emitEvent(.failure(domain: host, reason: .wildcardMismatch))
-                        completion(false)
-                        return
-                    }
-                    
-                    // Step 5: Cache the verified fingerprint
-                    let expiresAt = Date().addingTimeInterval(TimeInterval(response.ttl))
-                    try self.keychainService.saveFingerprint(
-                        response.fingerprint,
-                        forDomain: host,
-                        expiresAt: expiresAt
-                    )
-                    
-                    cachedFingerprint = CachedFingerprint(
-                        domain: response.domain,
-                        fingerprint: response.fingerprint,
-                        expiresAt: expiresAt
-                    )
-                } catch {
-                    NSLog("[DynamicPinning] Failed to fetch or verify fingerprint: \(error)")
-                    self.emitEvent(.failure(domain: host, reason: .fingerprintFetchFailed))
-                    completion(false)
-                    return
-                }
-            } else {
-                self.emitEvent(.cacheHit(domain: host))
+            self.performPinValidation(serverTrust: serverTrust, host: host, fingerprint: fingerprint, completion: completion)
+        }
+    }
+    
+    /// Obtains a fingerprint for the given host, either from cache or by fetching from the network.
+    private func obtainFingerprint(forHost host: String) -> CachedFingerprint? {
+        // Try to load from cache
+        do {
+            if let cached = try keychainService.loadFingerprint(forDomain: host) {
+                emitEvent(.cacheHit(domain: host))
+                return cached
+            }
+        } catch {
+            NSLog("[DynamicPinning] Keychain error: \(error)")
+            emitEvent(.failure(domain: host, reason: .keychainError))
+            return nil
+        }
+        
+        // Cache miss - fetch from network
+        emitEvent(.cacheMiss(domain: host))
+        return fetchAndCacheFingerprint(forHost: host)
+    }
+    
+    /// Fetches a fingerprint from the network, verifies it, and caches it.
+    private func fetchAndCacheFingerprint(forHost host: String) -> CachedFingerprint? {
+        do {
+            let response = try networkService.fetchFingerprintSync()
+            
+            guard try cryptoService.verifySignatureForPayload(response: response, publicKey: configuration.publicKey) else {
+                NSLog("[DynamicPinning] Signature verification failed for domain: \(host)")
+                emitEvent(.failure(domain: host, reason: .signatureVerificationFailed))
+                return nil
             }
             
-            // Step 6: Extract and hash server's public key
-            guard let fingerprint = cachedFingerprint else {
-                completion(false)
-                return
+            guard matchesDomain(host, pattern: response.domain) else {
+                NSLog("[DynamicPinning] Domain mismatch: \(host) does not match \(response.domain)")
+                emitEvent(.failure(domain: host, reason: .wildcardMismatch))
+                return nil
             }
             
-            let serverKeyHash: String
-            do {
-                serverKeyHash = try self.cryptoService.hashPublicKey(fromServerTrust: serverTrust)
-            } catch {
-                NSLog("[DynamicPinning] Failed to hash server public key: \(error)")
-                self.emitEvent(.failure(domain: host, reason: .certificateProcessingFailed))
-                completion(false)
-                return
-            }
-            
-            // Step 7: Compare hash with cached fingerprint
+            return cacheFingerprint(response: response, forHost: host)
+        } catch {
+            NSLog("[DynamicPinning] Failed to fetch or verify fingerprint: \(error)")
+            emitEvent(.failure(domain: host, reason: .fingerprintFetchFailed))
+            return nil
+        }
+    }
+    
+    /// Caches a fingerprint response and returns it as a CachedFingerprint.
+    private func cacheFingerprint(response: NetworkService.FingerprintResponse, forHost host: String) -> CachedFingerprint? {
+        let expiresAt = Date().addingTimeInterval(TimeInterval(response.ttl))
+        
+        do {
+            try keychainService.saveFingerprint(response.fingerprint, forDomain: host, expiresAt: expiresAt)
+            return CachedFingerprint(domain: response.domain, fingerprint: response.fingerprint, expiresAt: expiresAt)
+        } catch {
+            NSLog("[DynamicPinning] Failed to cache fingerprint: \(error)")
+            emitEvent(.failure(domain: host, reason: .keychainError))
+            return nil
+        }
+    }
+    
+    /// Performs the actual pin validation by comparing server certificate hash with expected fingerprint.
+    private func performPinValidation(
+        serverTrust: SecTrust,
+        host: String,
+        fingerprint: CachedFingerprint,
+        completion: @escaping (Bool) -> Void
+    ) {
+        do {
+            let serverKeyHash = try cryptoService.hashPublicKey(fromServerTrust: serverTrust)
             let isValid = serverKeyHash.lowercased() == fingerprint.fingerprint.lowercased()
             
             if isValid {
-                self.emitEvent(.success(domain: host))
+                emitEvent(.success(domain: host))
             } else {
                 NSLog("[DynamicPinning] Fingerprint mismatch for \(host)")
-                self.emitEvent(.failure(domain: host, reason: .hashMismatch))
+                emitEvent(.failure(domain: host, reason: .hashMismatch))
             }
             
             completion(isValid)
+        } catch {
+            NSLog("[DynamicPinning] Failed to hash server public key: \(error)")
+            emitEvent(.failure(domain: host, reason: .certificateProcessingFailed))
+            completion(false)
         }
     }
     

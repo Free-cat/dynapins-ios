@@ -190,13 +190,9 @@ internal final class CryptoService {
         // Get the SPKI (SubjectPublicKeyInfo) representation in DER format
         // This is the standard format that includes the algorithm identifier
         var error: Unmanaged<CFError>?
-        let attributes: [CFString: Any] = [
-            kSecAttrKeyType: kSecAttrKeyTypeRSA, // Will be determined automatically
-            kSecAttrKeyClass: kSecAttrKeyClassPublic
-        ]
         
-        // Copy external representation with SPKI format
-        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
+        // Verify that the public key can be exported
+        guard SecKeyCopyExternalRepresentation(publicKey, &error) != nil else {
             throw CryptoError.unableToExtractPublicKey
         }
         
@@ -225,114 +221,63 @@ internal final class CryptoService {
         return hashString
     }
     
-    /// Extracts the SPKI (SubjectPublicKeyInfo) from a DER-encoded certificate.
+    /// Extracts the SubjectPublicKeyInfo (SPKI) from an X.509 certificate.
     ///
-    /// This is a simplified DER parser that extracts the SPKI structure from an X.509 certificate.
-    /// The SPKI is located in the TBSCertificate -> SubjectPublicKeyInfo field.
+    /// X.509 Certificate structure (simplified):
+    /// ```
+    /// Certificate ::= SEQUENCE {
+    ///     tbsCertificate       TBSCertificate,
+    ///     ...
+    /// }
+    /// TBSCertificate ::= SEQUENCE {
+    ///     version         [0]  EXPLICIT Version DEFAULT v1,
+    ///     serialNumber         CertificateSerialNumber,
+    ///     signature            AlgorithmIdentifier,
+    ///     issuer               Name,
+    ///     validity             Validity,
+    ///     subject              Name,
+    ///     subjectPublicKeyInfo SubjectPublicKeyInfo,  <-- We want this
+    ///     ...
+    /// }
+    /// ```
     ///
-    /// - Parameter certificateData: The DER-encoded certificate data
-    /// - Returns: The SPKI data, or nil if extraction fails
+    /// - Parameter certificateData: The DER-encoded X.509 certificate
+    /// - Returns: The SPKI bytes, or nil if parsing fails
     private func extractSPKIFromCertificate(_ certificateData: Data) -> Data? {
-        // X.509 Certificate structure (simplified):
-        // Certificate ::= SEQUENCE {
-        //     tbsCertificate       TBSCertificate,
-        //     ...
-        // }
-        // TBSCertificate ::= SEQUENCE {
-        //     version         [0]  EXPLICIT Version DEFAULT v1,
-        //     serialNumber         CertificateSerialNumber,
-        //     signature            AlgorithmIdentifier,
-        //     issuer               Name,
-        //     validity             Validity,
-        //     subject              Name,
-        //     subjectPublicKeyInfo SubjectPublicKeyInfo,  <-- We want this
-        //     ...
-        // }
+        var parser = DERParser(data: certificateData)
         
-        let data = certificateData
-        var index = 0
+        // Parse outer certificate SEQUENCE
+        guard parser.skipSequence() else { return nil }
         
-        // Helper to read a DER length
-        func readLength() -> Int? {
-            guard index < data.count else { return nil }
-            let firstByte = data[index]
-            index += 1
-            
-            if firstByte & 0x80 == 0 {
-                // Short form
-                return Int(firstByte)
-            } else {
-                // Long form
-                let numBytes = Int(firstByte & 0x7F)
-                guard index + numBytes <= data.count else { return nil }
-                
-                var length = 0
-                for _ in 0..<numBytes {
-                    length = (length << 8) | Int(data[index])
-                    index += 1
-                }
-                return length
-            }
-        }
+        // Parse TBSCertificate SEQUENCE (we need to enter it, not skip)
+        guard parser.extractSequence() != nil else { return nil }
         
-        // Skip outer SEQUENCE (Certificate)
-        guard index < data.count, data[index] == 0x30 else { return nil } // SEQUENCE tag
-        index += 1
-        guard readLength() != nil else { return nil }
+        // Navigate through TBSCertificate fields to reach SPKI
+        return navigateToSPKI(parser: &parser)
+    }
+    
+    /// Navigates through TBSCertificate fields to extract the SPKI.
+    private func navigateToSPKI(parser: inout DERParser) -> Data? {
+        // Skip optional version [0]
+        guard parser.skipOptionalExplicit(tag: 0xA0) else { return nil }
         
-        // Skip TBSCertificate SEQUENCE tag
-        guard index < data.count, data[index] == 0x30 else { return nil }
-        index += 1
-        guard readLength() != nil else { return nil }
-        
-        // Skip version (EXPLICIT [0])
-        if index < data.count && data[index] == 0xA0 {
-            index += 1
-            guard let versionLength = readLength() else { return nil }
-            index += versionLength
-        }
-        
-        // Skip serialNumber
-        guard index < data.count, data[index] == 0x02 else { return nil } // INTEGER tag
-        index += 1
-        guard let serialLength = readLength() else { return nil }
-        index += serialLength
+        // Skip serialNumber (INTEGER)
+        guard parser.skipInteger() else { return nil }
         
         // Skip signature AlgorithmIdentifier (SEQUENCE)
-        guard index < data.count, data[index] == 0x30 else { return nil }
-        index += 1
-        guard let sigAlgLength = readLength() else { return nil }
-        index += sigAlgLength
+        guard parser.skipSequence() else { return nil }
         
         // Skip issuer (SEQUENCE)
-        guard index < data.count, data[index] == 0x30 else { return nil }
-        index += 1
-        guard let issuerLength = readLength() else { return nil }
-        index += issuerLength
+        guard parser.skipSequence() else { return nil }
         
         // Skip validity (SEQUENCE)
-        guard index < data.count, data[index] == 0x30 else { return nil }
-        index += 1
-        guard let validityLength = readLength() else { return nil }
-        index += validityLength
+        guard parser.skipSequence() else { return nil }
         
         // Skip subject (SEQUENCE)
-        guard index < data.count, data[index] == 0x30 else { return nil }
-        index += 1
-        guard let subjectLength = readLength() else { return nil }
-        index += subjectLength
+        guard parser.skipSequence() else { return nil }
         
-        // Now we're at subjectPublicKeyInfo (SEQUENCE)
-        guard index < data.count, data[index] == 0x30 else { return nil }
-        let spkiStart = index
-        index += 1
-        guard let spkiLength = readLength() else { return nil }
-        
-        // Extract SPKI (tag + length + content)
-        let totalSPKILength = index - spkiStart + spkiLength
-        guard spkiStart + totalSPKILength <= data.count else { return nil }
-        
-        return data.subdata(in: spkiStart..<(spkiStart + totalSPKILength))
+        // Extract subjectPublicKeyInfo (SEQUENCE)
+        return parser.extractSequence()
     }
     
     /// Computes the SHA-256 hash of the given data.
