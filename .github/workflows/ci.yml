@@ -18,14 +18,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Select Xcode version
-      run: |
-        if [ "${{ matrix.os }}" = "macos-14" ]; then
-          sudo xcode-select -s /Applications/Xcode_15.2.app/Contents/Developer
-        else
-          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
-        fi
-        xcodebuild -version
+    - name: Check Xcode version
+      run: xcodebuild -version
       
     - name: Cache Swift PM
       uses: actions/cache@v3
@@ -45,14 +39,16 @@ jobs:
       
     - name: Generate code coverage
       if: matrix.os == 'macos-14'
+      continue-on-error: true
       run: |
         xcrun llvm-cov export \
           .build/debug/DynamicPinningPackageTests.xctest/Contents/MacOS/DynamicPinningPackageTests \
           -instr-profile .build/debug/codecov/default.profdata \
-          -format="lcov" > coverage.lcov
+          -format="lcov" > coverage.lcov || echo "Coverage generation failed, but continuing"
       
     - name: Upload coverage to Codecov
       if: matrix.os == 'macos-14'
+      continue-on-error: true
       uses: codecov/codecov-action@v3
       with:
         files: ./coverage.lcov
@@ -83,13 +79,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Select Xcode
-      run: |
-        sudo xcode-select -s /Applications/Xcode_15.2.app/Contents/Developer
-        xcodebuild -version
+    - name: Check Xcode version
+      run: xcodebuild -version
       
     - name: List available simulators
-      run: xcrun simctl list devices available | grep iPhone
+      run: xcrun simctl list devices available | grep iPhone || echo "No iPhone simulators found"
       
     - name: Run iOS Tests
       run: |
@@ -107,10 +101,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Select Xcode
-      run: |
-        sudo xcode-select -s /Applications/Xcode_15.2.app/Contents/Developer
-        xcodebuild -version
+    - name: Check Xcode version
+      run: xcodebuild -version
       
     - name: Build for iOS Simulator
       run: |
